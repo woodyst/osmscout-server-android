@@ -8,8 +8,9 @@ real** — rutas, tiles, búsqueda, POIs y descarga de mapas.
 
 Del lado de Navius, sin cobertura funcionan **ruta, mapa, búsqueda de destino y
 POIs** en los tres ports, y la búsqueda mira ya todos los territorios
-instalados. Lo que queda son mejoras de robustez, no funcionalidad: reanudar
-descargas, comprobar versiones de formato y el Intent de arranque.
+instalados. De la lista de robustez solo queda **comprobar versiones de
+formato** (§3): las descargas ya se reanudan y el servidor ya lo despierta
+Navius.
 
 ## El objetivo, fijado por Edi el 2026-08-07
 
@@ -105,48 +106,29 @@ y no recibía el interruptor: se quedaba sin respaldo local aunque el servidor
 estuviera detectado. Todo interruptor que ponga `Main.qml` hay que reenviarlo al
 panel, igual que `setNavUrl`.
 
-## 2. Comprobar que la descarga grande aguanta
+## 2. Descargas grandes e interrumpidas — HECHO
 
-Se arregló el consumo de memoria (commit `4ecb224`): antes se juntaban dos
-copias del fichero en RAM y Android mataba el proceso al instalar
-`europe/spain`. Ahora se escribe según llega y se descomprime por bloques.
+El consumo de memoria se arregló en `4ecb224`: antes se juntaban dos copias del
+fichero en RAM y Android mataba el proceso al instalar `europe/spain`. Ahora se
+escribe según llega y se descomprime por bloques. Confirmado: España entera está
+instalada en el móvil.
 
-Quedó **descargando España al cerrar la sesión**, por los paquetes de Valhalla.
-Lo que de verdad rompía son las secciones de `mapboxgl` (150–222 MB cada una),
-que van **al final de la cola**. Si llegó ahí sin morir, el arreglo está
-confirmado; si no, mirar `logcat | grep 'OSMSCOUT\[maps\]'`.
+**Reanudar, descartar y no repetir lo ya bajado**: commit `3d1e321`, el
+2026-08-08. Cortar una instalación dejaba los ficheros en disco sin constar como
+instalados —pasó con Argelia y hubo que borrar 5 GB a mano—.
 
-Ojo con el espacio: España completa son unos 3,5 GB y en el teléfono ya está
-Argelia de una prueba anterior.
+- Un `downloads_pending.json` con el territorio en curso y lo que falta, escrito
+  antes del primer byte y **después de cada fichero**.
+- Al abrir, si hay algo a medias, la interfaz ofrece **Reanudar** o
+  **Descartar**. Descartar borra lo bajado de ese territorio respetando lo que
+  compartan los instalados, más los `.part` sueltos.
+- **No se vuelve a bajar lo que ya está**, porque se escribe a `<fichero>.part` y
+  solo se renombra al terminar: lo que tiene el nombre bueno está completo. De
+  los `.tar` se mira su `.list`. Con eso, instalar un vecino deja de repetir los
+  paquetes compartidos, y el botón de un territorio instalado es «Completar».
 
-## 2b. Una descarga interrumpida deja datos huerfanos
-
-**Sintoma real:** se instalo `africa/algeria`, se paro la app a mitad, y los
-ficheros se quedaron en disco **sin constar como instalados**. Ocupaban espacio,
-no salian en «Instalados» y no habia forma de quitarlos desde la interfaz. Hubo
-que borrar los 5 GB a mano.
-
-**Causa:** `countries_requested.json` solo se escribe **al terminar** el
-territorio entero (`MapManager::next()`, cuando la cola se vacia). Si se corta
-antes, no queda constancia de nada.
-
-**Lo que hay que hacer, y el usuario lo pidio explicitamente:**
-
-1. **Anotar el progreso segun avanza**, no al final. Basta con guardar el estado
-   del territorio en curso —los trabajos pendientes— en un fichero aparte, y
-   marcarlo como completo al vaciar la cola.
-2. **Reanudar**: al arrancar, si hay un territorio a medias, ofrecer «Reanudar» o
-   «Descartar». Reanudar es barato porque ya se sabe que ficheros faltan.
-3. **Saltarse lo que ya esta**. Hoy solo se comprueba para los globales
-   (`enqueueGlobalIfMissing`). Instalar Andorra teniendo Espana volvio a bajar
-   238 MB de una seccion de tiles que ya estaba en disco, porque los paquetes de
-   zonas fronterizas se comparten. Misma comprobacion que para los globales.
-4. **Poder borrar lo huerfano**: si hay ficheros de un territorio que no consta
-   instalado, ofrecer limpiarlo.
-
-Detalle a favor: la descarga ya escribe a `<fichero>.part` y solo renombra al
-terminar, asi que **un fichero presente esta completo** y un `.part` señala
-justo por donde se corto. La mitad del trabajo esta hecha.
+Probado entero en el móvil: Malta cortada y reanudada, «Completar» saltándose 11
+de 11, y Maldivas descartada borrando 178 elementos sin tocar España ni Andorra.
 
 ## 2c. El índice no devuelve los nombres de ciudad muy comunes
 
