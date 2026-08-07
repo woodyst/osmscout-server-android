@@ -301,12 +301,18 @@ unsigned int RouteService::serveSearch(const QString &path, MHD_Connection *conn
 
     // El punto de referencia sesga los resultados hacia donde esta el usuario.
     // Solo se aplica si vienen las dos coordenadas, igual que en el original.
+    //
+    // El zoom por defecto NO es el 16 del original: manda el radio del sesgo,
+    // (1 << (18 - zoom)) * 250 m, y 16 son mil metros. Conduciendo se busca a
+    // escala de comarca, asi que 12 —16 km— es lo razonable. El cliente puede
+    // pasar el suyo. Ver vendor/geocoder-nlp/CAMBIOS.md: con el original el
+    // radio se quedaba en 250 m hiciera lo que hiciera el cliente.
     GeoNLP::Geocoder::GeoReference reference;
     const QString lat = arg(connection, "lat");
     const QString lng = arg(connection, "lng");
     if (!lat.isEmpty() && !lng.isEmpty())
         reference.set(lat.toDouble(), lng.toDouble(),
-                      arg(connection, "zoom", QStringLiteral("16")).toUInt(),
+                      arg(connection, "zoom", QStringLiteral("12")).toUInt(),
                       arg(connection, "importance", QStringLiteral("0.75")).toDouble());
 
     QByteArray result;

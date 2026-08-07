@@ -1036,7 +1036,13 @@ double Geocoder::search_rank_location_bias(double distance, int zoom)
   if (distance <= 0)
     return 1.0;
 
-  zoom          = std::max(zoom, 18);
+  // EGP: el original pone std::max(zoom, 18), que es justo al reves. Con eso
+  // (18 - zoom) nunca es positivo, el radio se queda clavado en 250 m y el
+  // sesgo por cercania muere a los dos kilometros: buscar "Barcelona" desde
+  // Barcelona devolvia calles de Salamanca y de Jaen. Ademas, con zoom > 18 el
+  // desplazamiento es negativo, que en C++ es comportamiento indefinido.
+  // Photon, de donde viene la formula, acota el zoom por ARRIBA a 18.
+  zoom          = std::min(std::max(zoom, 1), 18);
   double radius = (1 << (18 - zoom)) * 250; // meters
   return exp(-distance / radius);
 }
