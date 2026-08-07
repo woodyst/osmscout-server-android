@@ -147,8 +147,30 @@ justo por donde se corto. La mitad del trabajo esta hecha.
 - **No comprueba versiones.** El catálogo trae `version` por motor y aquí se
   ignora; si el servidor sube el formato, los datos viejos dejarán de cargar sin
   aviso claro.
-- **El servicio en primer plano es de tipo `dataSync`**, que desde Android 15
-  tiene límite de 6 h diarias. Ver el riesgo 2 del plan.
+- **Que Navius despierte al servidor, en vez de tenerlo siempre vivo.**
+  Decidido por Edi el 2026-08-07.
+
+  Hoy el servidor levanta un servicio en primer plano de tipo `dataSync` y se
+  queda corriendo. Desde Android 15 ese tipo tiene **límite de 6 h diarias**, y
+  al agotarse el sistema lo para: para algo que debe responder conduciendo, no
+  sirve a largo plazo.
+
+  La alternativa elegida —y es la que Edi ya aprobó en su día para el arranque,
+  §2.1 del plan— es el **equivalente del D-Bus de Ubuntu Touch**: Navius lanza un
+  Intent explícito al servicio del servidor justo antes de detectarlo. Navius
+  está en primer plano en ese momento, así que `startForegroundService()` está
+  permitido, y los 30 s de espera que `detectOsmScout()` ya tiene escritos
+  sirven exactamente para eso.
+
+  Con eso el servicio deja de tener que vivir siempre: se levanta cuando hace
+  falta y el límite diario deja de ser un problema.
+
+  Nunca se implementó el Intent porque el servicio en primer plano bastaba para
+  probar. Falta: el lado de Navius (los tres ports) y decidir cuándo se para el
+  servidor —al cerrar Navius, o por inactividad—.
+
+  Recordatorio legal, ya razonado: **lanzar un Intent por nombre NO es enlazar**.
+  No entra código GPL en Navius, no comparten proceso ni compilación.
 
 ## 4. Del lado de Navius
 
