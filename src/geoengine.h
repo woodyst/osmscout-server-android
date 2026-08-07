@@ -22,31 +22,35 @@
 
 #include <QByteArray>
 #include <QString>
+#include <QStringList>
+#include <QVector>
 
 #include <mutex>
 
 #include "geocoder.h"
 #include "postal.h"
 
-/// Busqueda de destinos. Traduccion de GeoMaster de OSM Scout Server,
+/// Busqueda de destinos y de POIs. Traduccion de GeoMaster de OSM Scout Server,
 /// conservando su cadena: libpostal trocea y normaliza la consulta, y
 /// geocoder-nlp busca sobre el trie de marisa y la base de kyotocabinet.
 ///
-/// Diferencia con el original: aqui se carga UNA base de geocoder a la vez, la
-/// del territorio elegido. El original itera sobre varias segun el mapa
-/// seleccionado en sus ajustes, y esa seleccion aun no existe en este port.
+/// geocoder-nlp solo puede tener UNA base abierta, asi que buscar en varios
+/// territorios significa ir abriendolos por turnos dentro de la consulta. Es
+/// exactamente lo que hace el original en GeoMaster::search(), y por eso el
+/// coste crece con el numero de territorios instalados.
 class GeoEngine
 {
 public:
     GeoEngine();
 
-    /// Carga la base de <mapsDir>/geocoder-nlp/<territorio> y los datos de
-    /// libpostal. Si no se indica territorio, coge el primero que encuentre.
-    bool start(const QString &mapsDir, const QString &language = QStringLiteral("es"),
-               const QString &territory = QString());
+    /// Lee los territorios instalados de countries_requested.json, carga los
+    /// datos de libpostal y deja abierto el mayor. Los demas se abren cuando
+    /// hace falta.
+    bool start(const QString &mapsDir, const QString &language = QStringLiteral("es"));
     bool running() const;
 
-    QString territory() const { return m_territory; }
+    /// Todos los territorios en los que se busca, del mayor al menor.
+    QStringList territories() const;
 
     /// Devuelve un array JSON de {title, admin_region, lat, lng, type}, que es
     /// el mismo contrato que /v1/search del servidor original.
@@ -65,10 +69,27 @@ public:
     bool poiTypes(QByteArray &result);
 
 private:
+    struct Territory {
+        QString id;         ///< europe-spain: el directorio dentro de geocoder-nlp
+        QString geoPath;    ///< ruta absoluta de la base del geocoder
+        QString postalDir;  ///< datos de pais de libpostal; vacio si no hay
+        qint64  size{0};    ///< para ordenar de mayor a menor
+    };
+
+    /// Deja abierta la base de t. Si ya lo estaba no hace nada, que abrir una
+    /// base no es gratis y lo normal es repetir territorio entre consultas.
+    bool ensureOpen(const Territory &t);
+
+    /// Los territorios que declara countries_requested.json. Si el fichero no
+    /// esta —instalaciones anteriores a que se escribiera— se recurre a mirar
+    /// que directorios hay en geocoder-nlp/, sin datos de pais de libpostal.
+    QVector<Territory> readInstalled(const QString &mapsDir) const;
+
     mutable std::mutex m_mutex;
     GeoNLP::Geocoder m_geocoder;
     GeoNLP::Postal   m_postal;
-    QString m_territory;
+    QVector<Territory> m_list;
+    QString m_open;          ///< id del territorio abierto ahora mismo
     bool m_loaded{false};
 };
 

@@ -216,7 +216,9 @@ int main(int argc, char *argv[])
     qml.rootContext()->setContextProperty(QStringLiteral("engineOk"), engineOk);
     qml.rootContext()->setContextProperty(QStringLiteral("mapboxOk"), mapboxOk);
     qml.rootContext()->setContextProperty(QStringLiteral("geoOk"), geoOk);
-    qml.rootContext()->setContextProperty(QStringLiteral("territory"), geo.territory());
+    // Ya no es uno solo: la busqueda recorre todos los instalados.
+    qml.rootContext()->setContextProperty(QStringLiteral("territory"),
+                                          geo.territories().join(QStringLiteral(", ")));
     qml.rootContext()->setContextProperty(QStringLiteral("sectionCount"), mapbox.sectionCount());
     qml.rootContext()->setContextProperty(QStringLiteral("serverOk"), serverOk);
     qml.rootContext()->setContextProperty(QStringLiteral("tileDir"),
