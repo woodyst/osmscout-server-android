@@ -46,6 +46,35 @@ confirmado; si no, mirar `logcat | grep 'OSMSCOUT\[maps\]'`.
 Ojo con el espacio: España completa son unos 3,5 GB y en el teléfono ya está
 Argelia de una prueba anterior.
 
+## 2b. Una descarga interrumpida deja datos huerfanos
+
+**Sintoma real:** se instalo `africa/algeria`, se paro la app a mitad, y los
+ficheros se quedaron en disco **sin constar como instalados**. Ocupaban espacio,
+no salian en «Instalados» y no habia forma de quitarlos desde la interfaz. Hubo
+que borrar los 5 GB a mano.
+
+**Causa:** `countries_requested.json` solo se escribe **al terminar** el
+territorio entero (`MapManager::next()`, cuando la cola se vacia). Si se corta
+antes, no queda constancia de nada.
+
+**Lo que hay que hacer, y el usuario lo pidio explicitamente:**
+
+1. **Anotar el progreso segun avanza**, no al final. Basta con guardar el estado
+   del territorio en curso —los trabajos pendientes— en un fichero aparte, y
+   marcarlo como completo al vaciar la cola.
+2. **Reanudar**: al arrancar, si hay un territorio a medias, ofrecer «Reanudar» o
+   «Descartar». Reanudar es barato porque ya se sabe que ficheros faltan.
+3. **Saltarse lo que ya esta**. Hoy solo se comprueba para los globales
+   (`enqueueGlobalIfMissing`). Instalar Andorra teniendo Espana volvio a bajar
+   238 MB de una seccion de tiles que ya estaba en disco, porque los paquetes de
+   zonas fronterizas se comparten. Misma comprobacion que para los globales.
+4. **Poder borrar lo huerfano**: si hay ficheros de un territorio que no consta
+   instalado, ofrecer limpiarlo.
+
+Detalle a favor: la descarga ya escribe a `<fichero>.part` y solo renombra al
+terminar, asi que **un fichero presente esta completo** y un `.part` señala
+justo por donde se corto. La mitad del trabajo esta hecha.
+
 ## 3. Cosas menores
 
 - **`⛽` (U+26FD) sale como cuadradito en Navius.** Los otros siete símbolos que
@@ -53,8 +82,9 @@ Argelia de una prueba anterior.
   FreeSerif no tiene el surtidor y la única fuente del sistema con ese glifo es
   `NotoColorEmoji`, que es de mapas de bits a color y este port deja fuera a
   propósito. Hay que elegir otro carácter o empaquetar un emoji monocromo.
-- **El Map Manager no reanuda ni borra.** Si se corta una descarga, al reintentar
-  se baja todo otra vez. Tampoco hay forma de desinstalar un territorio.
+- **Desinstalar ya esta** (commit `8d83f61`), y respeta los paquetes que
+  comparten los territorios vecinos. Lo instalado antes de ese commit no tiene
+  `.tar.list` y de eso solo se borra el geocoder.
 - **No comprueba versiones.** El catálogo trae `version` por motor y aquí se
   ignora; si el servidor sube el formato, los datos viejos dejarán de cargar sin
   aviso claro.
