@@ -11,6 +11,28 @@ que es la operativa principal. Faltan los POIs, que Navius sigue pidiendo a
 Overpass. Las dos primeras tareas de esta lista son las que cierran el círculo, y
 las dos las pidió Edi expresamente.
 
+## El objetivo, fijado por Edi el 2026-08-07
+
+**Cobertura total en local, en los tres ports, con internet caído.** No es «que
+funcione algo»: es que Navius sea usable entero sin red, en Android, Ubuntu Touch
+y postmarketOS.
+
+| Servicio | Servidor | Cliente | Sin red |
+|---|---|---|---|
+| Ruta | ✅ | ✅ los 3 ports | **sí** |
+| Mapa | ✅ | ✅ los 3 ports | **sí** |
+| Buscar destino | ✅ | ✅ los 3 ports | **sí** ⚠️ un territorio |
+| POIs y radares | ✅ | ❌ **ninguno de los 3** | **no** |
+| Alertas y mensajes de usuarios | — | — | no, y a propósito |
+
+Lo único que queda para el objetivo son las **tareas 1 y 1b**. La API comunitaria
+—alertas de otros conductores, mensajes, compartir viaje— seguirá siendo online
+porque no es un servicio de mapas: sin red no hay nada que sincronizar.
+
+Criterio de aceptación: **con el móvil en modo avión, buscar un destino, calcular
+la ruta, navegarla con el mapa dibujándose y que aparezcan los POIs y los avisos
+de radar del trayecto.** En los tres ports.
+
 ---
 
 ## 1. La búsqueda solo mira UN territorio  ← lo primero
