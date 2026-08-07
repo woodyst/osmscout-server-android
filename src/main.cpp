@@ -29,6 +29,7 @@
 #include <QJniObject>
 #endif
 
+#include "geoengine.h"
 #include "mapboxglengine.h"
 #include "microhttpserver.h"
 #include "routeservice.h"
@@ -118,7 +119,10 @@ int main(int argc, char *argv[])
                           && mapbox.start(mapsDir,
                                           QStringLiteral("127.0.0.1:%1").arg(SERVER_PORT));
 
-    static RouteService service(&engine, &mapbox);
+    static GeoEngine geo;
+    const bool geoOk = !mapsDir.isEmpty() && geo.start(mapsDir);
+
+    static RouteService service(&engine, &mapbox, &geo);
 
     // Solo loopback. El servidor no tiene autenticacion ninguna —igual que en
     // Ubuntu Touch— asi que no puede quedar expuesto a la red: quien tiene que
@@ -134,6 +138,7 @@ int main(int argc, char *argv[])
 
     qInfo() << "OSMSCOUT: rutas" << (engineOk ? "OK" : "KO")
             << "tiles" << (mapboxOk ? "OK" : "KO")
+            << "busqueda" << (geoOk ? "OK" : "KO")
             << "servidor" << (serverOk ? "OK" : "KO")
             << "puerto" << SERVER_PORT;
 
@@ -145,6 +150,8 @@ int main(int argc, char *argv[])
     QQmlApplicationEngine qml;
     qml.rootContext()->setContextProperty(QStringLiteral("engineOk"), engineOk);
     qml.rootContext()->setContextProperty(QStringLiteral("mapboxOk"), mapboxOk);
+    qml.rootContext()->setContextProperty(QStringLiteral("geoOk"), geoOk);
+    qml.rootContext()->setContextProperty(QStringLiteral("territory"), geo.territory());
     qml.rootContext()->setContextProperty(QStringLiteral("sectionCount"), mapbox.sectionCount());
     qml.rootContext()->setContextProperty(QStringLiteral("serverOk"), serverOk);
     qml.rootContext()->setContextProperty(QStringLiteral("tileDir"),

@@ -17,6 +17,7 @@
 #ifndef ROUTESERVICE_H
 #define ROUTESERVICE_H
 
+#include "geoengine.h"
 #include "mapboxglengine.h"
 #include "microhttpservicebase.h"
 #include "valhallaengine.h"
@@ -34,10 +35,12 @@
 ///   GET /v1/mbgl/tile?x=&y=&z=          -> tile vectorial
 ///   GET /v1/mbgl/glyphs?stack=&range=   -> fuentes
 ///   GET /v1/mbgl/sprite*.png|.json      -> iconos
+///   GET /v1/search?search=&limit=       -> busqueda de destinos
+///   GET /v2/search?search=&limit=       -> idem, respuesta extendida
 class RouteService : public MicroHTTP::ServiceBase
 {
 public:
-    RouteService(ValhallaEngine *valhalla, MapboxGLEngine *mapbox);
+    RouteService(ValhallaEngine *valhalla, MapboxGLEngine *mapbox, GeoEngine *geo);
 
     unsigned int service(const char *url, MHD_Connection *connection,
                          MHD_Response *response,
@@ -48,8 +51,13 @@ private:
                                MHD_Response *response,
                                MicroHTTP::Connection::keytype connection_id);
 
+    unsigned int serveSearch(const QString &path, MHD_Connection *connection,
+                             MHD_Response *response,
+                             MicroHTTP::Connection::keytype connection_id);
+
     ValhallaEngine  *m_engine;
     MapboxGLEngine  *m_mapbox;
+    GeoEngine       *m_geo;
 };
 
 #endif // ROUTESERVICE_H

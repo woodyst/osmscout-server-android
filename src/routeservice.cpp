@@ -44,8 +44,8 @@ unsigned int sendError(MicroHTTP::Connection::keytype id, MHD_Response *response
 
 } // namespace
 
-RouteService::RouteService(ValhallaEngine *valhalla, MapboxGLEngine *mapbox)
-    : m_engine(valhalla), m_mapbox(mapbox)
+RouteService::RouteService(ValhallaEngine *valhalla, MapboxGLEngine *mapbox, GeoEngine *geo)
+    : m_engine(valhalla), m_mapbox(mapbox), m_geo(geo)
 {
 }
 
@@ -200,6 +200,10 @@ unsigned int RouteService::service(const char *url, MHD_Connection *connection,
     if (path.startsWith(QLatin1String("/v1/mbgl")))
         return serveMapboxGL(path, connection, response, connection_id);
 
+    if (path == QLatin1String("/v1/search") || path == QLatin1String("/v2/search")
+        || path == QLatin1String("/v1/guide") || path == QLatin1String("/v1/poi_types"))
+        return serveSearch(path, connection, response, connection_id);
+
     ValhallaEngine::ActorType actor;
     if (path == QLatin1String("/v2/route"))
         actor = ValhallaEngine::Route;
@@ -242,6 +246,73 @@ unsigned int RouteService::service(const char *url, MHD_Connection *connection,
     if (!m_engine->callActor(actor, QByteArray(json), result, error))
         return sendError(connection_id, response,
                          QStringLiteral("Error en Valhalla: ") + error);
+
+    sendData(connection_id, response, result, "application/json; charset=UTF-8");
+    return MHD_HTTP_OK;
+}
+
+unsigned int RouteService::serveSearch(const QString &path, MHD_Connection *connection,
+                                       MHD_Response *response,
+                                       MicroHTTP::Connection::keytype connection_id)
+{
+    if (!m_geo->running())
+        return sendError(connection_id, response,
+                         QStringLiteral("No hay datos de busqueda instalados"));
+
+    // ── Tipos de POI ────────────────────────────────────────────────────────
+    if (path == QLatin1String("/v1/poi_types")) {
+        QByteArray types;
+        if (!m_geo->poiTypes(types))
+            return sendError(connection_id, response,
+                             QStringLiteral("No se pudieron leer los tipos de POI"));
+        sendData(connection_id, response, types, "application/json; charset=UTF-8");
+        return MHD_HTTP_OK;
+    }
+
+    // ── POIs cercanos ───────────────────────────────────────────────────────
+    if (path == QLatin1String("/v1/guide")) {
+        // poitype o query, que el original acepta los dos por compatibilidad.
+        QString poitype = arg(connection, "poitype");
+        if (poitype.isEmpty()) poitype = arg(connection, "query");
+        const QString name = arg(connection, "name");
+        if (poitype.isEmpty() && name.isEmpty())
+            return sendError(connection_id, response,
+                             QStringLiteral("Error while reading guide query parameters"));
+
+        QByteArray pois;
+        if (!m_geo->guide(poitype, name,
+                          arg(connection, "lat").toDouble(),
+                          arg(connection, "lng").toDouble(),
+                          arg(connection, "radius", QStringLiteral("1000")).toDouble(),
+                          arg(connection, "limit", QStringLiteral("50")).toUInt(),
+                          pois))
+            return sendError(connection_id, response, QStringLiteral("Fallo la busqueda de POIs"));
+
+        sendData(connection_id, response, pois, "application/json; charset=UTF-8");
+        return MHD_HTTP_OK;
+    }
+
+    const QString pattern = arg(connection, "search").simplified();
+    if (pattern.isEmpty())
+        return sendError(connection_id, response,
+                         QStringLiteral("Error while reading search query parameters"));
+
+    const size_t limit = arg(connection, "limit", QStringLiteral("25")).toUInt();
+
+    // El punto de referencia sesga los resultados hacia donde esta el usuario.
+    // Solo se aplica si vienen las dos coordenadas, igual que en el original.
+    GeoNLP::Geocoder::GeoReference reference;
+    const QString lat = arg(connection, "lat");
+    const QString lng = arg(connection, "lng");
+    if (!lat.isEmpty() && !lng.isEmpty())
+        reference.set(lat.toDouble(), lng.toDouble(),
+                      arg(connection, "zoom", QStringLiteral("16")).toUInt(),
+                      arg(connection, "importance", QStringLiteral("0.75")).toDouble());
+
+    QByteArray result;
+    if (!m_geo->search(pattern, limit, reference,
+                       path == QLatin1String("/v2/search"), result))
+        return sendError(connection_id, response, QStringLiteral("Fallo la busqueda"));
 
     sendData(connection_id, response, result, "application/json; charset=UTF-8");
     return MHD_HTTP_OK;

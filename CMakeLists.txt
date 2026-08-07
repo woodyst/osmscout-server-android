@@ -33,6 +33,8 @@ set(VALHALLA_BUILD_DIR "${VALHALLA_SOURCE_DIR}/build-android")
 
 qt_add_executable(osmscout-server
     src/main.cpp
+    src/geoengine.cpp
+    src/geoengine.h
     src/mapboxglengine.cpp
     src/mapboxglengine.h
     src/routeservice.cpp
@@ -44,6 +46,10 @@ qt_add_executable(osmscout-server
     # geocoder-nlp, y depender de ese arbol obligaria a clonarlo en la maquina
     # de compilacion solo por dos ficheros.
     vendor/sqlite3pp/sqlite3pp.cpp
+    # geocoder-nlp, tambien de osmscout-server (GPL). Es su motor de busqueda:
+    # libpostal trocea la consulta y esto la resuelve sobre el trie y la base.
+    vendor/geocoder-nlp/geocoder.cpp
+    vendor/geocoder-nlp/postal.cpp
     # Capa HTTP levantada tal cual de OSM Scout Server (GPL). Se copia sin
     # tocar para poder seguir sus cambios; solo depende de QByteArray.
     vendor/uhttp/microhttpconnection.cpp
@@ -61,6 +67,7 @@ target_include_directories(osmscout-server PRIVATE
     "${VALHALLA_SOURCE_DIR}/third_party/rapidjson/include"
     "${ANDROID_DEPS_PREFIX}/include"
     vendor/sqlite3pp
+    vendor/geocoder-nlp
 )
 # Boost va por -isystem y apuntando a un arbol que contiene SOLO boost/: pasarle
 # /usr/include a un compilador cruzado meteria las cabeceras del anfitrion por
@@ -75,6 +82,11 @@ target_link_libraries(osmscout-server PRIVATE
     # Android trae sqlite en /system pero el NDK no la expone; se compila la
     # amalgamacion (scripts/build-sqlite-android.sh).
     "${ANDROID_DEPS_PREFIX}/lib/libsqlite3.a"
+    # Busqueda: libpostal normaliza, marisa es el trie y kyotocabinet la base
+    # de identificadores (scripts/build-geocoder-deps-android.sh).
+    "${ANDROID_DEPS_PREFIX}/lib/libpostal.a"
+    "${ANDROID_DEPS_PREFIX}/lib/libmarisa.a"
+    "${ANDROID_DEPS_PREFIX}/lib/libkyotocabinet.a"
     z
     log   # el logger de Valhalla llama a __android_log_print
 )
@@ -84,6 +96,7 @@ qt_add_resources(osmscout-server "recursos"
     FILES
         qml/Main.qml
         data/valhalla.json-3.4.0
+        data/geocoder-npl-tag-aliases.json
         styles/mapboxgl/sprites/sprite.json
         styles/mapboxgl/sprites/sprite.png
         styles/mapboxgl/sprites/sprite_mc.json
