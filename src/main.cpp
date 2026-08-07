@@ -32,6 +32,7 @@
 #include "cerrtolog.h"
 #include "geoengine.h"
 #include "mapboxglengine.h"
+#include "mapmanager.h"
 #include "microhttpserver.h"
 #include "routeservice.h"
 #include "valhallaengine.h"
@@ -162,6 +163,13 @@ int main(int argc, char *argv[])
     qml.rootContext()->setContextProperty(QStringLiteral("tileDir"),
                                           mapsDir.isEmpty() ? QStringLiteral("—") : mapsDir);
     qml.rootContext()->setContextProperty(QStringLiteral("serverPort"), int(SERVER_PORT));
+    // El gestor de mapas se expone al QML, que es quien tiene la lista y los
+    // botones. Cuelga de la app para que viva lo que dure el proceso.
+    static MapManager mapManager(mapsDir.isEmpty()
+                                     ? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+                                           + QStringLiteral("/Maps.OSM")
+                                     : mapsDir);
+    qml.rootContext()->setContextProperty(QStringLiteral("mapManager"), &mapManager);
     qml.load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
     if (qml.rootObjects().isEmpty())
         return -1;

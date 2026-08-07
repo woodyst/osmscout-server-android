@@ -1,74 +1,198 @@
 import QtQuick
 import QtQuick.Window
+import QtQuick.Controls
 
-// Pantalla minima: estado del servidor y poco mas. La interfaz de verdad —mapas
-// instalados, descargas, espacio ocupado— es de la fase 6.
+// Pantalla del servidor: estado de los motores y gestor de mapas.
 Window {
+    id: win
     visible: true
     title: "OSM Scout Server"
     color: "#0D1B2A"
 
+    readonly property bool activo: serverOk && (engineOk || mapboxOk || geoOk)
+
     Column {
-        anchors.centerIn: parent
-        spacing: 18
-        width: parent.width * 0.85
+        id: cabecera
+        anchors { top: parent.top; left: parent.left; right: parent.right; margins: 16 }
+        spacing: 12
 
         Text {
             text: "OSM Scout Server"
-            color: "white"
-            font.pixelSize: 28
-            font.bold: true
+            color: "white"; font.pixelSize: 26; font.bold: true
             anchors.horizontalCenter: parent.horizontalCenter
         }
 
         Rectangle {
             width: parent.width
-            height: estado.implicitHeight + 32
+            height: estado.implicitHeight + 24
             radius: 8
             color: "#1C2D40"
-            border.color: (serverOk && (engineOk || mapboxOk)) ? "#66BB6A" : "#EF5350"
+            border.color: win.activo ? "#66BB6A" : "#EF5350"
 
             Column {
                 id: estado
-                anchors.centerIn: parent
-                width: parent.width - 32
-                spacing: 8
+                anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; margins: 12 }
+                spacing: 4
 
                 Text {
-                    text: (serverOk && (engineOk || mapboxOk)) ? "✓ Activo" : "✗ No disponible"
-                    color: (serverOk && (engineOk || mapboxOk)) ? "#66BB6A" : "#EF5350"
-                    font.pixelSize: 22
-                    font.bold: true
+                    text: win.activo ? "✓ Activo · 127.0.0.1:" + serverPort : "✗ No disponible"
+                    color: win.activo ? "#66BB6A" : "#EF5350"
+                    font.pixelSize: 18; font.bold: true
                 }
                 Text {
-                    text: "Rutas (Valhalla): " + (engineOk ? "listo" : "sin mapas")
-                    color: "#90A4AE"; font.pixelSize: 16
-                }
-                Text {
-                    text: "Mapa (tiles): " + (mapboxOk ? sectionCount + " secciones" : "sin mapas")
-                    color: "#90A4AE"; font.pixelSize: 16
-                }
-                Text {
-                    text: "HTTP: " + (serverOk ? "escuchando en 127.0.0.1:" + serverPort
-                                               : "no se pudo abrir el puerto")
-                    color: "#90A4AE"; font.pixelSize: 16
+                    text: "Rutas " + (engineOk ? "✓" : "✗")
+                          + "   Mapa " + (mapboxOk ? "✓ (" + sectionCount + ")" : "✗")
+                          + "   Búsqueda " + (geoOk ? "✓ " + territory : "✗")
+                    color: "#90A4AE"; font.pixelSize: 14
                     wrapMode: Text.Wrap; width: parent.width
-                }
-                Text {
-                    text: "Mapas: " + tileDir
-                    color: "#607D8B"; font.pixelSize: 13
-                    wrapMode: Text.WrapAnywhere; width: parent.width
                 }
             }
         }
 
-        Text {
-            text: "Deja esta app abierta mientras navegas con Navius."
-            color: "#607D8B"
-            font.pixelSize: 14
-            wrapMode: Text.Wrap
-            width: parent.width
-            horizontalAlignment: Text.AlignHCenter
+        Row {
+            spacing: 10
+            Button {
+                text: "Actualizar catálogo"
+                enabled: !mapManager.busy
+                onClicked: mapManager.refreshCatalogue()
+            }
+            Text {
+                text: mapManager.status
+                color: "#90A4AE"; font.pixelSize: 13
+                anchors.verticalCenter: parent.verticalCenter
+                width: win.width - 200; elide: Text.ElideRight
+            }
         }
+
+        ProgressBar {
+            width: parent.width
+            visible: mapManager.busy
+            from: 0; to: 100
+            value: mapManager.progress
+        }
+    }
+
+    // Lista de territorios agrupada por continente. Son 444 en el catálogo, y
+    // sin agrupar hay que recorrer la pantalla entera para llegar a Europa.
+    // El filtro, cuando se usa, salta la agrupación y enseña las coincidencias
+    // directamente: buscar «spain» no debería obligar a abrir un desplegable.
+    Column {
+        anchors { top: cabecera.bottom; left: parent.left; right: parent.right
+                  bottom: parent.bottom; margins: 16; topMargin: 12 }
+        spacing: 8
+
+        TextField {
+            id: filtro
+            width: parent.width
+            placeholderText: "Filtrar territorio (p. ej. spain)"
+        }
+
+        ListView {
+            id: lista
+            width: parent.width
+            height: parent.height - filtro.height - 8
+            clip: true
+            spacing: 2
+
+            property var abiertos: ({})
+
+            // Con filtro: lista plana de coincidencias. Sin filtro: un elemento
+            // por continente, y debajo los suyos si está desplegado.
+            model: {
+                var t = mapManager.territories
+                var f = filtro.text.toLowerCase()
+                if (f !== "")
+                    return t.filter(function(x) { return x.toLowerCase().indexOf(f) >= 0 })
+                                .map(function(x) { return { tipo: "hoja", id: x } })
+
+                var grupos = []
+                var vistos = {}
+                for (var i = 0; i < t.length; i++) {
+                    var cont = t[i].indexOf("/") > 0 ? t[i].split("/")[0] : t[i]
+                    if (!vistos[cont]) {
+                        vistos[cont] = []
+                        grupos.push(cont)
+                    }
+                    vistos[cont].push(t[i])
+                }
+
+                var out = []
+                for (var g = 0; g < grupos.length; g++) {
+                    var c = grupos[g]
+                    out.push({ tipo: "grupo", id: c, cuantos: vistos[c].length })
+                    if (lista.abiertos[c])
+                        for (var j = 0; j < vistos[c].length; j++)
+                            out.push({ tipo: "hoja", id: vistos[c][j] })
+                }
+                return out
+            }
+
+            delegate: Item {
+                width: lista.width
+                height: 46
+
+                // ── Continente ──────────────────────────────────────────────
+                Rectangle {
+                    anchors.fill: parent
+                    visible: modelData.tipo === "grupo"
+                    color: "#16243440"
+
+                    Text {
+                        anchors { left: parent.left; leftMargin: 8; verticalCenter: parent.verticalCenter }
+                        // "+"/"−" y no triangulos: a la fuente del sistema le
+                        // faltan los glifos ▸▾ y salen como cuadraditos. Es el
+                        // mismo problema que Navius resolvio empaquetando un
+                        // subconjunto de FreeSerif; aqui no compensa por dos
+                        // caracteres.
+                        text: (lista.abiertos[modelData.id] ? "−  " : "+  ")
+                              + modelData.id + "   (" + modelData.cuantos + ")"
+                        color: "#90CAF9"; font.pixelSize: 16; font.bold: true
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            var a = lista.abiertos
+                            a[modelData.id] = !a[modelData.id]
+                            lista.abiertos = a   // reasignar para que el modelo se reevalúe
+                        }
+                    }
+                }
+
+                // ── Territorio ──────────────────────────────────────────────
+                Item {
+                    anchors.fill: parent
+                    visible: modelData.tipo === "hoja"
+                    property bool yaEsta: mapManager.installed.indexOf(modelData.id) >= 0
+
+                    Text {
+                        anchors { left: parent.left; leftMargin: filtro.text === "" ? 28 : 4
+                                  verticalCenter: parent.verticalCenter }
+                        width: parent.width - 130
+                        text: modelData.id
+                        color: parent.yaEsta ? "#66BB6A" : "#CFD8DC"
+                        font.pixelSize: 15
+                        elide: Text.ElideRight
+                    }
+                    Button {
+                        anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                        text: parent.yaEsta ? "Reinstalar" : "Instalar"
+                        enabled: !mapManager.busy
+                        onClicked: mapManager.install(modelData.id)
+                    }
+                    Rectangle {
+                        anchors.bottom: parent.bottom
+                        width: parent.width; height: 1; color: "#1C2D40"
+                    }
+                }
+            }
+        }
+    }
+
+    Text {
+        anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter; margins: 4 }
+        text: mapManager.territories.length === 0
+              ? "Pulsa «Actualizar catálogo» para ver los mapas disponibles"
+              : ""
+        color: "#607D8B"; font.pixelSize: 13
     }
 }

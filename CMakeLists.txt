@@ -9,13 +9,13 @@
 # ademas de que en Qt 6 el despliegue de Android esta pensado para CMake.
 cmake_minimum_required(VERSION 3.21)
 
-project(osmscout-server-android VERSION 0.1.0 LANGUAGES CXX)
+project(osmscout-server-android VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick)
 qt_standard_project_setup(REQUIRES 6.5)
 
 # ── Dependencias cruzadas a mano ────────────────────────────────────────────
@@ -28,6 +28,12 @@ set(VALHALLA_SOURCE_DIR "$ENV{HOME}/pkg-valhalla-lite/valhalla"
     CACHE PATH "Arbol de Valhalla")
 set(BOOST_HEADERS_DIR "$ENV{HOME}/src_valhalla/boost-headers"
     CACHE PATH "Directorio que contiene solo boost/")
+# Android NO expone libcrypto/libssl a las apps, asi que Qt se queda sin backend
+# TLS y cualquier HTTPS falla con "TLS initialization failed". Hay que meter
+# OpenSSL en el APK; se usan las compilaciones de KDAB, que es lo que recomienda
+# Qt. Hace falta para el Map Manager, que descarga de https://data.modrana.org.
+set(ANDROID_OPENSSL_DIR "$ENV{HOME}/android_openssl/ssl_3/arm64-v8a"
+    CACHE PATH "OpenSSL 3 precompilado para Android arm64")
 
 set(VALHALLA_BUILD_DIR "${VALHALLA_SOURCE_DIR}/build-android")
 
@@ -38,6 +44,8 @@ qt_add_executable(osmscout-server
     src/geoengine.h
     src/mapboxglengine.cpp
     src/mapboxglengine.h
+    src/mapmanager.cpp
+    src/mapmanager.h
     src/routeservice.cpp
     src/routeservice.h
     src/valhallaengine.cpp
@@ -51,6 +59,9 @@ qt_add_executable(osmscout-server
     # libpostal trocea la consulta y esto la resuelve sobre el trie y la base.
     vendor/geocoder-nlp/geocoder.cpp
     vendor/geocoder-nlp/postal.cpp
+    # Extractor de tar (MIT, de rxi). El Map Manager original usa el tar del
+    # sistema; aqui se enlaza para no depender de ningun binario de Android.
+    vendor/microtar/microtar.c
     # Capa HTTP levantada tal cual de OSM Scout Server (GPL). Se copia sin
     # tocar para poder seguir sus cambios; solo depende de QByteArray.
     vendor/uhttp/microhttpconnection.cpp
@@ -69,6 +80,7 @@ target_include_directories(osmscout-server PRIVATE
     "${ANDROID_DEPS_PREFIX}/include"
     vendor/sqlite3pp
     vendor/geocoder-nlp
+    vendor/microtar
 )
 # Boost va por -isystem y apuntando a un arbol que contiene SOLO boost/: pasarle
 # /usr/include a un compilador cruzado meteria las cabeceras del anfitrion por
@@ -76,7 +88,7 @@ target_include_directories(osmscout-server PRIVATE
 target_compile_options(osmscout-server PRIVATE -isystem "${BOOST_HEADERS_DIR}")
 
 target_link_libraries(osmscout-server PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick
+    Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick
     "${VALHALLA_BUILD_DIR}/src/libvalhalla.so"
     "${ANDROID_DEPS_PREFIX}/lib/libmicrohttpd.a"
     "${ANDROID_DEPS_PREFIX}/lib/libprotobuf-lite.a"
@@ -88,6 +100,9 @@ target_link_libraries(osmscout-server PRIVATE
     "${ANDROID_DEPS_PREFIX}/lib/libpostal.a"
     "${ANDROID_DEPS_PREFIX}/lib/libmarisa.a"
     "${ANDROID_DEPS_PREFIX}/lib/libkyotocabinet.a"
+    # Los mapas del servidor vienen en bzip2 y el original los descomprime
+    # lanzando "bunzip2", que Android no trae (scripts/build-bzip2-android.sh).
+    "${ANDROID_DEPS_PREFIX}/lib/libbz2.a"
     z
     log   # el logger de Valhalla llama a __android_log_print
 )
@@ -123,6 +138,7 @@ if(ANDROID)
         QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android"
         # libvalhalla.so hay que meterla en el APK a mano: no es una dependencia
         # que androiddeployqt sepa descubrir.
-        QT_ANDROID_EXTRA_LIBS "${VALHALLA_BUILD_DIR}/src/libvalhalla.so"
+        QT_ANDROID_EXTRA_LIBS
+            "${VALHALLA_BUILD_DIR}/src/libvalhalla.so;${ANDROID_OPENSSL_DIR}/libcrypto_3.so;${ANDROID_OPENSSL_DIR}/libssl_3.so"
     )
 endif()
