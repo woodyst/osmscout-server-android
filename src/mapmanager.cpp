@@ -419,8 +419,12 @@ void MapManager::next()
         }
 
         if (job.isTar) {
-            const QString dir = QFileInfo(job.dest).absolutePath() + QStringLiteral("/..");
-            if (!extractTar(job.dest, QDir(dir).absolutePath())) {
+            // A la RAIZ de los mapas, no al directorio del paquete: los .tar ya
+            // traen dentro rutas del tipo "valhalla/tiles/0/…", asi que
+            // extraerlos en valhalla/ dejaba un valhalla/valhalla/tiles que el
+            // motor no encuentra. No se noto hasta instalar desde cero, porque
+            // el directorio bueno ya existia de una copia anterior.
+            if (!extractTar(job.dest, m_mapsDir)) {
                 m_busy = false;
                 setStatus(QStringLiteral("No se pudo extraer ") + job.dest);
                 emit finished(false, m_status);

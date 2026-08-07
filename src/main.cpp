@@ -15,6 +15,8 @@
  */
 
 #include <QDir>
+#include <QDirIterator>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -49,14 +51,70 @@ const quint16 SERVER_PORT = 8553;
 ///     que sea real porque Valhalla mapea los tiles en memoria: un content://
 ///     del SAF no sirve, cosa ya aprendida portando la musica de Navius.
 ///  2. /data/local/tmp, que es por donde entran los datos en las pruebas por adb.
+/// Donde DEBEN ir los mapas, exista ya el directorio o no. Se calcula aparte de
+/// buscarlos porque el gestor de descargas necesita saberlo aunque no haya nada
+/// instalado todavia: si se le deja elegir por su cuenta acaba en el
+/// almacenamiento interno —que es lo que devuelve writableLocation()—, donde
+/// findMapsDir() no mira y no se llega por USB. Paso de verdad: 3,7 GB
+/// descargados a un sitio que la propia app luego no encontraba.
+QString preferredMapsDir()
+{
+    for (const QString &dir : QStandardPaths::standardLocations(QStandardPaths::AppDataLocation))
+        if (dir.contains(QStringLiteral("/Android/data/")))
+            return dir + QStringLiteral("/Maps.OSM");
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+           + QStringLiteral("/Maps.OSM");
+}
+
+/// Rescata los mapas que una version anterior dejo en el almacenamiento INTERNO.
+///
+/// Hubo un fallo: cuando no habia mapas todavia, el gestor de descargas caia en
+/// writableLocation(), que en Android es el directorio interno, y se bajaba ahi
+/// —3,7 GB— donde findMapsDir() no mira y no se llega por USB. Ya no ocurre,
+/// pero quien lo sufrio tiene los datos en el sitio equivocado.
+///
+/// Se mueven en el dispositivo, que es disco contra disco y va rapido; sacarlos
+/// por adb serian varios GB dos veces por la red.
+void migrateInternalMaps(const QString &destino)
+{
+    const QString interno = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+                            + QStringLiteral("/Maps.OSM");
+    if (interno == destino || !QDir(interno).exists() || QDir(destino).exists())
+        return;
+
+    qInfo() << "OSMSCOUT: moviendo mapas de" << interno << "a" << destino;
+
+    QDir().mkpath(destino);
+    QDirIterator it(interno, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot,
+                    QDirIterator::Subdirectories);
+    int n = 0;
+    while (it.hasNext()) {
+        const QString origen = it.next();
+        const QString rel = origen.mid(interno.size() + 1);
+        const QString final = destino + QLatin1Char('/') + rel;
+        if (QFileInfo(origen).isDir()) {
+            QDir().mkpath(final);
+        } else {
+            QDir().mkpath(QFileInfo(final).absolutePath());
+            // rename() falla entre sistemas de ficheros distintos, que es el caso:
+            // interno y externo no son el mismo. Copiar y borrar.
+            if (QFile::copy(origen, final)) {
+                QFile::remove(origen);
+                ++n;
+            }
+        }
+    }
+    QDir(interno).removeRecursively();
+    qInfo() << "OSMSCOUT: movidos" << n << "ficheros";
+}
+
 QString findMapsDir()
 {
     QStringList candidates;
 
-    for (const QString &dir : QStandardPaths::standardLocations(QStandardPaths::AppDataLocation)) {
-        if (dir.contains(QStringLiteral("/Android/data/")))
-            candidates << dir + QStringLiteral("/Maps.OSM");
-    }
+    const QString pref = preferredMapsDir();
+    if (!pref.isEmpty())
+        candidates << pref;
     candidates << QStringLiteral("/data/local/tmp");
 
     // Vale con que haya UNO de los dos motores: se puede tener rutas sin tiles
@@ -111,6 +169,7 @@ int main(int argc, char *argv[])
     app.setApplicationName(QStringLiteral("OSM Scout Server"));
     app.setOrganizationName(QStringLiteral("EGP Sistemas"));
 
+    migrateInternalMaps(preferredMapsDir());
     const QString mapsDir = findMapsDir();
 
     static ValhallaEngine engine;
@@ -165,10 +224,7 @@ int main(int argc, char *argv[])
     qml.rootContext()->setContextProperty(QStringLiteral("serverPort"), int(SERVER_PORT));
     // El gestor de mapas se expone al QML, que es quien tiene la lista y los
     // botones. Cuelga de la app para que viva lo que dure el proceso.
-    static MapManager mapManager(mapsDir.isEmpty()
-                                     ? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
-                                           + QStringLiteral("/Maps.OSM")
-                                     : mapsDir);
+    static MapManager mapManager(mapsDir.isEmpty() ? preferredMapsDir() : mapsDir);
     qml.rootContext()->setContextProperty(QStringLiteral("mapManager"), &mapManager);
     qml.load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
     if (qml.rootObjects().isEmpty())

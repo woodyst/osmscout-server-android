@@ -75,6 +75,38 @@ Window {
             value: mapManager.progress
         }
 
+        // Los motores se cargan al arrancar, asi que un mapa recien descargado
+        // no se usa hasta reiniciar. Se avisa y se da el boton, en vez de
+        // rearrancarlos en caliente: Valhalla y el geocoder mapean ficheros en
+        // memoria y recargarlos con peticiones en vuelo es pedir problemas.
+        Rectangle {
+            width: parent.width
+            height: aviso.implicitHeight + 20
+            radius: 6
+            color: "#2A1F0D"
+            border.color: "#FFA726"
+            visible: mapManager.installed.length > 0 && !win.activo
+
+            Column {
+                id: aviso
+                anchors { left: parent.left; right: parent.right
+                          verticalCenter: parent.verticalCenter; margins: 10 }
+                spacing: 8
+
+                Text {
+                    text: "Hay mapas descargados que aún no se están usando.\n"
+                          + "Reinicia el servidor para cargarlos."
+                    color: "#FFCC80"; font.pixelSize: 14
+                    wrapMode: Text.Wrap; width: parent.width
+                }
+                Button {
+                    text: "Reiniciar servidor"
+                    enabled: !mapManager.busy
+                    onClicked: Qt.quit()
+                }
+            }
+        }
+
         // ── Instalados ──────────────────────────────────────────────────────
         // Aparte de la lista de disponibles: son pocos y lo que se quiere hacer
         // con ellos —ver que hay y quitar lo que sobra— no tiene nada que ver
