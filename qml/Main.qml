@@ -74,12 +74,16 @@ Window {
                 enabled: !mapManager.busy
                 onClicked: win.activo ? server.stop() : server.start()
             }
-            Text {
-                text: mapManager.status
-                color: "#90A4AE"; font.pixelSize: 13
-                anchors.verticalCenter: parent.verticalCenter
-                width: win.width - 200; elide: Text.ElideRight
-            }
+        }
+
+        // Debajo de los botones y no al lado: con dos botones ya no cabe, y el
+        // texto se salía por el borde derecho de la pantalla.
+        Text {
+            width: parent.width
+            text: mapManager.status
+            color: "#90A4AE"; font.pixelSize: 13
+            wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+            visible: text !== ""
         }
 
         ProgressBar {
@@ -87,6 +91,43 @@ Window {
             visible: mapManager.busy
             from: 0; to: 100
             value: mapManager.progress
+        }
+
+        // Una descarga cortada —el sistema mató la app, se acabó la batería, se
+        // fue la red— deja el territorio a medias. Antes eso eran gigas en disco
+        // que no salían en «Instalados» y no había forma de quitar desde aquí.
+        Rectangle {
+            width: parent.width
+            height: aMedias.implicitHeight + 20
+            radius: 6
+            color: "#0D2436"
+            border.color: "#42A5F5"
+            visible: mapManager.pending !== "" && !mapManager.busy
+
+            Column {
+                id: aMedias
+                anchors { left: parent.left; right: parent.right
+                          verticalCenter: parent.verticalCenter; margins: 10 }
+                spacing: 8
+
+                Text {
+                    text: "«" + mapManager.pending + "» se quedó a medias.\n"
+                          + "Reanudar sigue por donde iba; descartar borra lo bajado."
+                    color: "#BBDEFB"; font.pixelSize: 14
+                    wrapMode: Text.Wrap; width: parent.width
+                }
+                Row {
+                    spacing: 10
+                    Button {
+                        text: "Reanudar"
+                        onClicked: { win._mapasNuevos = true; mapManager.resume() }
+                    }
+                    Button {
+                        text: "Descartar"
+                        onClicked: mapManager.discard()
+                    }
+                }
+            }
         }
 
         // Los motores se cargan al arrancar el servidor, asi que un mapa recien
@@ -271,7 +312,11 @@ Window {
                     }
                     Button {
                         anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-                        text: parent.yaEsta ? "Reinstalar" : "Instalar"
+                        // «Completar» y no «Reinstalar»: lo que ya está en
+                        // disco no se vuelve a bajar, así que sobre un
+                        // territorio entero esto no hace nada, y sobre uno a
+                        // medias baja solo lo que falta.
+                        text: parent.yaEsta ? "Completar" : "Instalar"
                         enabled: !mapManager.busy
                         onClicked: { win._mapasNuevos = true; mapManager.install(modelData.id) }
                     }

@@ -44,6 +44,7 @@ class MapManager : public QObject
     Q_PROPERTY(int progress READ progress NOTIFY changed)
     Q_PROPERTY(QStringList territories READ territories NOTIFY changed)
     Q_PROPERTY(QStringList installed READ installed NOTIFY changed)
+    Q_PROPERTY(QString pending READ pending NOTIFY changed)
 
 public:
     explicit MapManager(const QString &mapsDir, QObject *parent = nullptr);
@@ -54,6 +55,10 @@ public:
     QStringList territories() const { return m_territories; }
     QStringList installed() const;
 
+    /// Territorio que se quedo a medias, si lo hay. Vacio cuando no hay nada
+    /// pendiente. Es lo que permite ofrecer «Reanudar» al volver a abrir.
+    QString pending() const { return m_pending; }
+
     /// Baja el catalogo del servidor. Sin el no se puede instalar nada.
     Q_INVOKABLE void refreshCatalogue();
 
@@ -63,6 +68,15 @@ public:
 
     /// Borra un territorio, respetando lo que compartan los demas.
     Q_INVOKABLE void uninstall(const QString &id);
+
+    /// Sigue la descarga que se quedo a medias, por donde iba.
+    Q_INVOKABLE void resume();
+
+    /// Tira lo que se llevaba descargado del territorio a medias y se olvida de
+    /// el. Sin esto, cortar una instalacion dejaba los ficheros en disco sin
+    /// constar como instalados: ocupando sitio, sin salir en la lista y sin
+    /// forma de quitarlos desde la interfaz. Paso de verdad con Argelia, 5 GB.
+    Q_INVOKABLE void discard();
 
 signals:
     void changed();
@@ -77,6 +91,25 @@ private:
 
     void reloadTerritories();
     void setStatus(const QString &s, int progress = -1);
+
+    /// El fichero de progreso. Se escribe al empezar y despues de CADA fichero,
+    /// no al final: si se escribiera al final, un corte a mitad no dejaria
+    /// constancia de nada, que es justo lo que pasaba antes.
+    void saveProgress();
+    void clearProgress();
+    bool loadProgress();
+
+    /// Si el fichero ya esta en disco no se vuelve a bajar. Vale porque se
+    /// escribe a <fichero>.part y solo se renombra al terminar: lo que tiene el
+    /// nombre bueno esta completo. De los .tar queda su .list, que es la senal
+    /// de que se extrajeron.
+    bool yaEsta(const Job &job) const;
+
+    /// Borra los datos de un territorio respetando lo que compartan los otros.
+    /// Lo usan uninstall() y discard(): el primero con lo instalado, el segundo
+    /// con lo que se quedo a medias.
+    int borrarDatos(const QJsonObject &mio, const QJsonObject &otros);
+
     void enqueueFeature(const QJsonObject &territory, const QString &feature,
                         const QStringList &files);
     void enqueueGlobalIfMissing(const QJsonObject &cat, const QString &id,
@@ -105,6 +138,7 @@ private:
     QStringList m_territories;
     QQueue<Job> m_queue;
     QString m_installing;
+    QString m_pending;   ///< territorio a medias segun el fichero de progreso
     QFile m_out;         ///< se escribe a <dest>.part y se renombra al acabar
     bz_stream m_bz;
     bool m_bzActive{false};   ///< hay un flujo bzip2 abierto

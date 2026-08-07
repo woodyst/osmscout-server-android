@@ -18,6 +18,7 @@
 
 #include <QDebug>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -38,6 +39,9 @@ namespace {
 const QString DEFAULT_SERVER = QStringLiteral("https://data.modrana.org/osm_scout_server");
 const QString CATALOGUE      = QStringLiteral("countries_provided.json");
 const QString INSTALLED      = QStringLiteral("countries_requested.json");
+// Lo que falta por bajar del territorio en curso. No lo tiene el original: alli
+// no hay app que el sistema pueda matar a mitad de una descarga de 3,5 GB.
+const QString PENDING        = QStringLiteral("downloads_pending.json");
 
 // Listas de ficheros por motor, copiadas de mapmanagerfeature.cpp del original.
 const QStringList GEOCODER_FILES = {
@@ -121,6 +125,73 @@ MapManager::MapManager(const QString &mapsDir, QObject *parent)
     }
 
     reloadTerritories();
+
+    // Si la vez anterior se corto una instalacion, aqui queda constancia y la
+    // interfaz puede ofrecer seguir o descartar.
+    QFile p(fullPath(PENDING));
+    if (p.open(QIODevice::ReadOnly)) {
+        m_pending = QJsonDocument::fromJson(p.readAll()).object()
+                        .value(QStringLiteral("id")).toString();
+        if (!m_pending.isEmpty())
+            qInfo() << "OSMSCOUT[maps]: quedo a medias" << m_pending;
+    }
+}
+
+void MapManager::saveProgress()
+{
+    QJsonArray restantes;
+    for (const Job &j : m_queue) {
+        QJsonObject o;
+        o.insert(QStringLiteral("url"), j.url);
+        o.insert(QStringLiteral("dest"), j.dest);
+        o.insert(QStringLiteral("isTar"), j.isTar);
+        restantes.append(o);
+    }
+
+    QJsonObject obj;
+    obj.insert(QStringLiteral("id"), m_installing);
+    obj.insert(QStringLiteral("total"), m_total);
+    obj.insert(QStringLiteral("restantes"), restantes);
+
+    QDir().mkpath(m_mapsDir);
+    QFile f(fullPath(PENDING));
+    if (f.open(QIODevice::WriteOnly))
+        f.write(QJsonDocument(obj).toJson(QJsonDocument::Compact));
+}
+
+void MapManager::clearProgress()
+{
+    QFile::remove(fullPath(PENDING));
+    m_pending.clear();
+}
+
+bool MapManager::loadProgress()
+{
+    QFile f(fullPath(PENDING));
+    if (!f.open(QIODevice::ReadOnly))
+        return false;
+
+    const QJsonObject obj = QJsonDocument::fromJson(f.readAll()).object();
+    m_installing = obj.value(QStringLiteral("id")).toString();
+    m_total = obj.value(QStringLiteral("total")).toInt();
+    m_queue.clear();
+    for (const QJsonValue &v : obj.value(QStringLiteral("restantes")).toArray()) {
+        const QJsonObject o = v.toObject();
+        Job j;
+        j.url = o.value(QStringLiteral("url")).toString();
+        j.dest = o.value(QStringLiteral("dest")).toString();
+        j.isTar = o.value(QStringLiteral("isTar")).toBool();
+        m_queue.enqueue(j);
+    }
+    return !m_installing.isEmpty() && !m_queue.isEmpty();
+}
+
+bool MapManager::yaEsta(const Job &job) const
+{
+    // Del .tar no queda el .tar —se borra al extraerlo— sino su listado, que es
+    // ademas lo que hace falta para poder desinstalarlo despues.
+    return job.isTar ? QFile::exists(job.dest + QStringLiteral(".list"))
+                     : QFile::exists(job.dest);
 }
 
 /// Compone la URL de un fichero.
@@ -351,14 +422,80 @@ void MapManager::install(const QString &id)
 
     m_busy = true;
     m_total = m_queue.size();
+    m_pending = id;
+    // Antes de bajar el primer byte: si se corta enseguida, tiene que constar.
+    saveProgress();
     setStatus(QStringLiteral("Instalando %1: %2 ficheros").arg(id).arg(m_total), 0);
     next();
+}
+
+void MapManager::resume()
+{
+    if (m_busy)
+        return;
+
+    if (!loadProgress()) {
+        clearProgress();
+        setStatus(QStringLiteral("No había nada que reanudar"));
+        emit changed();
+        return;
+    }
+
+    m_busy = true;
+    m_pending = m_installing;
+    setStatus(QStringLiteral("Reanudando %1: quedan %2 ficheros")
+                  .arg(m_installing).arg(m_queue.size()), 0);
+    next();
+}
+
+void MapManager::discard()
+{
+    if (m_busy)
+        return;
+
+    if (!loadProgress()) {
+        clearProgress();
+        emit changed();
+        return;
+    }
+
+    const QString id = m_installing;
+    const QJsonObject mio = catalogue().value(id).toObject();
+
+    // Lo instalado y completo manda: si un paquete lo comparte un territorio que
+    // si esta instalado, no se toca.
+    QFile f(fullPath(INSTALLED));
+    QJsonObject inst;
+    if (f.open(QIODevice::ReadOnly)) {
+        inst = QJsonDocument::fromJson(f.readAll()).object();
+        f.close();
+    }
+
+    const int borrados = borrarDatos(mio, inst);
+
+    // Y los .part que hayan quedado a medias por ahi.
+    int trozos = 0;
+    QDirIterator it(m_mapsDir, QStringList() << QStringLiteral("*.part"),
+                    QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext())
+        if (QFile::remove(it.next()))
+            ++trozos;
+
+    m_queue.clear();
+    m_installing.clear();
+    clearProgress();
+
+    setStatus(QStringLiteral("Descartado %1 (%2 elementos, %3 a medias)")
+                  .arg(id).arg(borrados).arg(trozos));
+    emit changed();
+    emit finished(true, m_status);
 }
 
 void MapManager::next()
 {
     if (m_queue.isEmpty()) {
         m_busy = false;
+        clearProgress();
 
         // Se anota lo instalado para que el proximo arranque sepa que hay, igual
         // que hace el original con countries_requested.json.
@@ -380,6 +517,21 @@ void MapManager::next()
     }
 
     const Job job = m_queue.dequeue();
+
+    // Lo que ya esta en disco no se vuelve a bajar. Sirve para dos cosas a la
+    // vez: reanudar una descarga cortada, y no repetir los paquetes que
+    // comparten los territorios vecinos —instalar Andorra teniendo Espana
+    // volvia a bajar 238 MB de tiles que ya estaban—.
+    if (yaEsta(job)) {
+        setStatus(QStringLiteral("Ya estaba: %1").arg(QFileInfo(job.dest).fileName()),
+                  m_total > 0 ? (m_total - m_queue.size()) * 100 / m_total : 0);
+        saveProgress();
+        // Sin recursion directa: una cola de miles de ficheros ya presentes
+        // desbordaria la pila.
+        QMetaObject::invokeMethod(this, [this] { next(); }, Qt::QueuedConnection);
+        return;
+    }
+
     setStatus(QStringLiteral("Descargando %1").arg(QFileInfo(job.dest).fileName()),
               m_total > 0 ? (m_total - m_queue.size() - 1) * 100 / m_total : 0);
 
@@ -405,6 +557,11 @@ void MapManager::next()
         if (reply->error() != QNetworkReply::NoError) {
             streamAbort();
             m_busy = false;
+            // El que ha fallado vuelve a la cola y se anota: asi «Reanudar»
+            // empieza por el, no por el siguiente.
+            m_queue.prepend(job);
+            saveProgress();
+            m_pending = m_installing;
             setStatus(QStringLiteral("Falló %1: %2")
                           .arg(QFileInfo(job.dest).fileName(), reply->errorString()));
             emit finished(false, m_status);
@@ -434,6 +591,9 @@ void MapManager::next()
             QFile::remove(job.dest);
         }
 
+        // Despues de CADA fichero, no al final. Es la diferencia entre poder
+        // reanudar y quedarse con gigas huerfanos si Android mata el proceso.
+        saveProgress();
         next();
     });
 }
@@ -610,12 +770,30 @@ void MapManager::uninstall(const QString &id)
     if (mio.isEmpty())
         return;
 
+    QJsonObject otros = inst;
+    otros.remove(id);
+    const int borrados = borrarDatos(mio, otros);
+
+    inst.remove(id);
+    if (f.open(QIODevice::WriteOnly)) {
+        f.write(QJsonDocument(inst).toJson(QJsonDocument::Indented));
+        f.close();
+    }
+
+    setStatus(QStringLiteral("Desinstalado %1 (%2 elementos)").arg(id).arg(borrados));
+    emit changed();
+    emit finished(true, m_status);
+}
+
+int MapManager::borrarDatos(const QJsonObject &mio, const QJsonObject &otros)
+{
+    if (mio.isEmpty())
+        return 0;
+
     // Paquetes que siguen haciendo falta para los demas.
     QSet<QString> enUso;
-    for (const QString &otro : inst.keys()) {
-        if (otro == id)
-            continue;
-        const QJsonObject o = inst.value(otro).toObject();
+    for (const QString &otro : otros.keys()) {
+        const QJsonObject o = otros.value(otro).toObject();
         for (const QString &feat : { QStringLiteral("valhalla"),
                                      QStringLiteral("mapboxgl_country") })
             for (const QJsonValue &p : o.value(feat).toObject()
@@ -660,13 +838,5 @@ void MapManager::uninstall(const QString &id)
             ++borrados;
     }
 
-    inst.remove(id);
-    if (f.open(QIODevice::WriteOnly)) {
-        f.write(QJsonDocument(inst).toJson(QJsonDocument::Indented));
-        f.close();
-    }
-
-    setStatus(QStringLiteral("Desinstalado %1 (%2 elementos)").arg(id).arg(borrados));
-    emit changed();
-    emit finished(true, m_status);
+    return borrados;
 }
