@@ -7,8 +7,9 @@ Estado: **los cinco servicios del servidor funcionan y están probados en el mó
 real** — rutas, tiles, búsqueda, POIs y descarga de mapas.
 
 Del lado de Navius, sin cobertura funcionan **ruta, mapa, búsqueda de destino y
-POIs** en los tres ports. Lo único que sigue abierto es que la búsqueda mira un
-solo territorio, que es la tarea 1.
+POIs** en los tres ports, y la búsqueda mira ya todos los territorios
+instalados. Lo que queda son mejoras de robustez, no funcionalidad: reanudar
+descargas, comprobar versiones de formato y el Intent de arranque.
 
 ## El objetivo, fijado por Edi el 2026-08-07
 
@@ -20,14 +21,15 @@ y postmarketOS.
 |---|---|---|---|
 | Ruta | ✅ | ✅ los 3 ports | **sí** |
 | Mapa | ✅ | ✅ los 3 ports | **sí** |
-| Buscar destino | ✅ | ✅ los 3 ports | **sí** ⚠️ un territorio |
-| POIs | ✅ | ✅ los 3 ports | **sí** ⚠️ un territorio |
+| Buscar destino | ✅ | ✅ los 3 ports | **sí** |
+| POIs | ✅ | ✅ los 3 ports | **sí** |
 | Radares | — | caché propia | **sí**, si ya se barrió la zona |
 | Alertas y mensajes de usuarios | — | — | no, y a propósito |
 
-Lo único que queda para el objetivo es la **tarea 1**. La API comunitaria
-—alertas de otros conductores, mensajes, compartir viaje— seguirá siendo online
-porque no es un servicio de mapas: sin red no hay nada que sincronizar.
+**El objetivo está cumplido**, con la salvedad de los radares en zona nunca
+barrida (tarea 1b). La API comunitaria —alertas de otros conductores, mensajes,
+compartir viaje— seguirá siendo online porque no es un servicio de mapas: sin
+red no hay nada que sincronizar.
 
 Criterio de aceptación: **con el móvil en modo avión, buscar un destino, calcular
 la ruta, navegarla con el mapa dibujándose y que aparezcan los POIs y los avisos
@@ -39,29 +41,33 @@ probarlo en sus dispositivos**.
 
 ---
 
-## 1. La búsqueda solo mira UN territorio  ← lo primero
+## 1. Búsqueda multi-territorio — HECHO el 2026-08-08
 
-**Síntoma:** con España y Argelia instalados, buscar un destino o un POI solo
-encuentra cosas de uno de los dos. Las rutas y el mapa sí funcionan en todos.
+Commit `db9aa7e`. Se replica lo del original: las bases se abren **por turnos
+dentro de la propia consulta**, porque geocoder-nlp solo admite una abierta.
+`search()` conserva el resultado que resuelve más niveles de jerarquía y junta
+los que empatan; `guide()` acumula entre territorios y ordena por distancia al
+final, así que las fronteras dejan de cortar.
 
-**Causa:** `geocoder-nlp` carga **una base a la vez**, y como todavía no hay
-selección de mapa, `GeoEngine::start()` (`src/geoengine.cpp`) coge **la más
-grande** de las instaladas. Lo peor no es que elija: es que si mañana se instala
-un territorio mayor, cambia sola y en silencio.
+Probado en el móvil con España y Andorra: «Andorra la Vella» ya sale (antes,
+nada), búsquedas de 100 a 630 ms y 27 gasolineras de los dos países en una
+consulta a caballo de la frontera, en 116 ms.
 
-**Cómo lo hace el original**, que es lo que hay que replicar: en
-`geomaster.cpp`, `GeoMaster::search()` recorre `m_countries` y llama a
-`m_geocoder.load()` de cada base **dentro del bucle de búsqueda**, acumulando
-resultados y quedándose con los que resuelven más niveles de jerarquía
-(`levels_resolved`). No mantiene varias abiertas: las va cargando por turnos en
-cada consulta.
+Dos cosas que el original no necesita y aquí sí:
 
-**A tener en cuenta:** cargar una base cuesta, así que el tiempo de respuesta se
-multiplica por el número de territorios. Conviene ordenar por cercanía al punto
-de referencia que ya llega en la petición (`lat`/`lng`) y cortar, en vez de
-recorrerlos todos siempre.
+- **Quitar repetidos.** Los extractos se solapan: Andorra la Vella sale igual en
+  `europe-spain` que en `europe-andorra`, con las mismas coordenadas. Con un
+  solo territorio eso no pasaba nunca; con todos es lo normal.
+- **Recorrerlos todos, sin cortar al primer acierto.** El original tiene ajuste
+  para eso porque admite decenas de mapas; aquí se instalan pocos y abrir una
+  base sale a ~150 ms. **Si alguien instala veinte territorios esto se nota**:
+  el tiempo por consulta queda en el registro (`OSMSCOUT: búsqueda en N
+  territorio(s) … ms`), que es por donde se vería.
 
-Aplica igual a `GeoEngine::guide()`, que tiene el mismo problema.
+De paso desapareció la tabla de cuatro países que adivinaba el directorio de
+libpostal: ahora sale de `countries_requested.json`, donde el Map Manager guarda
+la entrada entera del catálogo. Si el fichero no está —instalaciones viejas— se
+recurre a mirar qué directorios hay, sin datos de país.
 
 ## 1b. POIs locales — HECHO el 2026-08-08
 
