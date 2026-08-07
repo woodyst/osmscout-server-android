@@ -35,14 +35,18 @@ Window {
                 spacing: 4
 
                 Text {
-                    text: win.activo ? "✓ Activo · 127.0.0.1:" + serverPort : "✗ No disponible"
+                    // El ✗ (U+2717) sale como cuadradito en este movil, aunque el
+                    // ✓ si esta. Esta app no empaqueta fuente de simbolos como
+                    // Navius, asi que se usa solo lo que el sistema garantiza.
+                    text: win.activo ? "✓ Activo · 127.0.0.1:" + serverPort
+                                     : "No disponible"
                     color: win.activo ? "#66BB6A" : "#EF5350"
                     font.pixelSize: 18; font.bold: true
                 }
                 Text {
-                    text: "Rutas " + (engineOk ? "✓" : "✗")
-                          + "   Mapa " + (mapboxOk ? "✓ (" + sectionCount + ")" : "✗")
-                          + "   Búsqueda " + (geoOk ? "✓ " + territory : "✗")
+                    text: "Rutas " + (engineOk ? "✓" : "—")
+                          + "   Mapa " + (mapboxOk ? "✓ (" + sectionCount + ")" : "—")
+                          + "   Búsqueda " + (geoOk ? "✓ " + territory : "—")
                     color: "#90A4AE"; font.pixelSize: 14
                     wrapMode: Text.Wrap; width: parent.width
                 }
