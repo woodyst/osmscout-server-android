@@ -83,6 +83,9 @@ son de lo más visible cuando faltan.
    type, distance}]}` y Overpass devuelve `{elements:[...]}`; hay que mapear,
    como se hizo con los Feature de Photon.
 4. Portarlo a mano a UT y pmOS: los QML de los tres son independientes.
+5. **Commit por port**, y en UT y pmOS **push al git publico** —lo pidio Edi
+   expresamente—. Ojo: esos dos hay que publicarlos desde el repositorio
+   publico, no desde otro remoto. Comprobar `git remote -v` antes de subir.
 
 **Ojo con los radares**, que no son un POI cualquiera: hoy salen de una consulta
 Overpass propia con `highway=speed_camera`. Comprobar si el geocoder los tiene
