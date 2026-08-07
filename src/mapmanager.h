@@ -20,9 +20,12 @@
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QObject>
+#include <QFile>
 #include <QQueue>
 #include <QString>
 #include <QStringList>
+
+#include <bzlib.h>
 
 /// Descarga de mapas. Equivalente reducido del MapManager de OSM Scout Server:
 /// mismo servidor, mismo catalogo y mismas rutas, pero sin reanudacion ni
@@ -76,7 +79,14 @@ private:
     void enqueuePackages(const QJsonObject &territory, const QString &feature,
                          const QString &subdir);
     void next();
-    bool writeDecompressed(const QByteArray &data, const QString &dest);
+
+    // Descompresion por bloques. No se puede hacer de una vez: las secciones de
+    // tiles pasan de 200 MB y, entre el buffer de descarga y el de salida, el
+    // proceso se iba de medio giga y Android lo mataba.
+    bool streamStart(const QString &dest);
+    bool streamFeed(const QByteArray &chunk);
+    bool streamFinish(const QString &dest);
+    void streamAbort();
     bool extractTar(const QString &tarPath, const QString &destDir);
 
     QString featureUrl(const QString &feature, const QString &rel) const;
@@ -90,6 +100,11 @@ private:
     QStringList m_territories;
     QQueue<Job> m_queue;
     QString m_installing;
+    QFile m_out;         ///< se escribe a <dest>.part y se renombra al acabar
+    bz_stream m_bz;
+    bool m_bzActive{false};   ///< hay un flujo bzip2 abierto
+    bool m_bzDecided{false};  ///< ya se sabe si venia comprimido o no
+    QByteArray m_head;        ///< primeros bytes, para mirar la firma "BZh"
     int  m_total{0};
     int  m_progress{0};
     bool m_busy{false};

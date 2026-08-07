@@ -315,11 +315,27 @@ void MapManager::next()
     setStatus(QStringLiteral("Descargando %1").arg(QFileInfo(job.dest).fileName()),
               m_total > 0 ? (m_total - m_queue.size() - 1) * 100 / m_total : 0);
 
+    if (!streamStart(job.dest)) {
+        m_busy = false;
+        setStatus(QStringLiteral("No se pudo crear ") + job.dest);
+        emit finished(false, m_status);
+        return;
+    }
+
     QNetworkReply *reply = m_net.get(QNetworkRequest(QUrl(job.url)));
+
+    // Se escribe segun llega, sin acumular la respuesta: es la diferencia entre
+    // usar unos pocos MB y medio giga por fichero.
+    connect(reply, &QNetworkReply::readyRead, this, [this, reply] {
+        if (!streamFeed(reply->readAll()))
+            reply->abort();
+    });
+
     connect(reply, &QNetworkReply::finished, this, [this, reply, job] {
         reply->deleteLater();
 
         if (reply->error() != QNetworkReply::NoError) {
+            streamAbort();
             m_busy = false;
             setStatus(QStringLiteral("Falló %1: %2")
                           .arg(QFileInfo(job.dest).fileName(), reply->errorString()));
@@ -327,7 +343,7 @@ void MapManager::next()
             return;
         }
 
-        if (!writeDecompressed(reply->readAll(), job.dest)) {
+        if (!streamFinish(job.dest)) {
             m_busy = false;
             setStatus(QStringLiteral("No se pudo guardar ") + job.dest);
             emit finished(false, m_status);
@@ -350,17 +366,94 @@ void MapManager::next()
     });
 }
 
-bool MapManager::writeDecompressed(const QByteArray &data, const QString &dest)
+bool MapManager::streamStart(const QString &dest)
 {
-    QByteArray plain;
-    if (!bunzip(data, plain))
+    QDir().mkpath(QFileInfo(dest).absolutePath());
+    m_out.setFileName(dest + QStringLiteral(".part"));
+    if (!m_out.open(QIODevice::WriteOnly | QIODevice::Truncate))
         return false;
 
-    QDir().mkpath(QFileInfo(dest).absolutePath());
-    QFile f(dest);
-    if (!f.open(QIODevice::WriteOnly))
+    m_head.clear();
+    m_bzDecided = false;
+    m_bzActive = false;
+    return true;
+}
+
+bool MapManager::streamFeed(const QByteArray &chunk)
+{
+    if (!m_out.isOpen())
         return false;
-    return f.write(plain) == plain.size();
+
+    QByteArray in = chunk;
+
+    // Hasta tener tres bytes no se sabe si viene comprimido, asi que se
+    // retienen. No todo lo del servidor es .bz2 y esto evita tener que acertar
+    // por motor cual si y cual no.
+    if (!m_bzDecided) {
+        m_head += in;
+        if (m_head.size() < 3)
+            return true;
+        in = m_head;
+        m_head.clear();
+        m_bzDecided = true;
+        if (in.startsWith("BZh")) {
+            memset(&m_bz, 0, sizeof(m_bz));
+            if (BZ2_bzDecompressInit(&m_bz, 0, 0) != BZ_OK)
+                return false;
+            m_bzActive = true;
+        }
+    }
+
+    if (!m_bzActive)
+        return m_out.write(in) == in.size();
+
+    m_bz.next_in = const_cast<char *>(in.constData());
+    m_bz.avail_in = uint(in.size());
+
+    QByteArray buf(1 << 20, Qt::Uninitialized);
+    while (m_bz.avail_in > 0) {
+        m_bz.next_out = buf.data();
+        m_bz.avail_out = uint(buf.size());
+        const int ret = BZ2_bzDecompress(&m_bz);
+        if (ret != BZ_OK && ret != BZ_STREAM_END)
+            return false;
+        const qint64 got = buf.size() - m_bz.avail_out;
+        if (got > 0 && m_out.write(buf.constData(), got) != got)
+            return false;
+        if (ret == BZ_STREAM_END)
+            break;
+    }
+    return true;
+}
+
+bool MapManager::streamFinish(const QString &dest)
+{
+    // Un fichero mas corto que la firma nunca llego a decidirse; se vuelca tal
+    // cual para no perderlo.
+    if (!m_bzDecided && !m_head.isEmpty())
+        m_out.write(m_head);
+
+    if (m_bzActive) {
+        BZ2_bzDecompressEnd(&m_bz);
+        m_bzActive = false;
+    }
+    m_out.close();
+
+    // Solo al final se renombra: asi un corte a mitad no deja un fichero de
+    // mapas truncado con nombre bueno, que luego fallaria al cargar.
+    QFile::remove(dest);
+    return QFile::rename(m_out.fileName(), dest);
+}
+
+void MapManager::streamAbort()
+{
+    if (m_bzActive) {
+        BZ2_bzDecompressEnd(&m_bz);
+        m_bzActive = false;
+    }
+    if (m_out.isOpen())
+        m_out.close();
+    QFile::remove(m_out.fileName());
 }
 
 bool MapManager::extractTar(const QString &tarPath, const QString &destDir)
