@@ -148,6 +148,45 @@ Detalle a favor: la descarga ya escribe a `<fichero>.part` y solo renombra al
 terminar, asi que **un fichero presente esta completo** y un `.part` señala
 justo por donde se corto. La mitad del trabajo esta hecha.
 
+## 2c. El índice no devuelve los nombres de ciudad muy comunes
+
+Lo levantó el agente del port de UT y está **verificado, pero sin arreglar**.
+
+Buscar **«Barcelona» a secas no devuelve la ciudad de Barcelona**. No es que no
+esté: «Barcelona Barcelonès» la encuentra al instante, como
+`boundary_administrative`. Lo que pasa es que hay tantos objetos llamados
+Barcelona —plazas, calles, parajes, aldeas— que el motor corta el conjunto de
+candidatos antes de llegar a ella. Comprobado pidiendo **200 resultados: ni uno
+a menos de 50 km** del centro de Barcelona.
+
+Con nombres menos repetidos funciona bien: «Mataró», «Terrassa» y
+«Andorra la Vella» devuelven la ciudad, y «Sabadell Vallès Occidental» también.
+
+**Dónde está el corte**, para quien lo retome: en `geocoder.cpp`,
+`m_max_inter_results = m_max_results + m_max_inter_offset` (100), y el bucle
+sobre `search_result` rompe al llegar a ese tope. Los candidatos se recorren en
+el orden del trie, no por relevancia, así que subir el tope solo mueve el
+problema. El arreglo de verdad sería puntuar antes de truncar, que es meterse a
+fondo en la librería.
+
+Mitigado por el lado del cliente hasta donde se puede: se piden 25 resultados y
+se enseñan los 6 más cercanos (ver 2d).
+
+## 2d. El sesgo por cercanía — ARREGLADO el 2026-08-08
+
+Commit `b5f87a7`, y en los tres ports el orden se arregla además en el cliente
+(`navius_android` `48b1dc6`, UT `7c68c4f`, pmOS `77ced48`, los dos últimos ya
+subidos).
+
+`search_rank_location_bias()` de geocoder-nlp acotaba el zoom **por abajo** a 18,
+con lo que el radio del sesgo se quedaba clavado en 250 m y el punto de
+referencia no influía a más de dos kilómetros. Detalle en
+`vendor/geocoder-nlp/CAMBIOS.md`.
+
+**Ojo si algún día se actualiza el vendor**: el parche se pierde y vuelve el
+síntoma —resultados de la otra punta del país—. El orden del lado del cliente lo
+tapa, pero el servidor volvería a elegir mal qué 25 manda.
+
 ## 3. Cosas menores
 
 - **`⛽` (U+26FD) sale como cuadradito en Navius.** Los otros siete símbolos que
