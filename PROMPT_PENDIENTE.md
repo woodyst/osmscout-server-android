@@ -3,8 +3,13 @@
 Escrito el 2026-08-07 para arrancar la siguiente sesión sin contexto previo.
 El plan por fases está en `~/prog_ia/navius/docs/PLAN-mapas-locales-android.md`.
 
-Estado: **los cinco servicios funcionan y están probados en el móvil real** —
-rutas, tiles, búsqueda, POIs y descarga de mapas.
+Estado: **los cinco servicios del servidor funcionan y están probados en el móvil
+real** — rutas, tiles, búsqueda, POIs y descarga de mapas.
+
+Del lado de Navius, sin cobertura funcionan **ruta, mapa y búsqueda de destino**,
+que es la operativa principal. Faltan los POIs, que Navius sigue pidiendo a
+Overpass. Las dos primeras tareas de esta lista son las que cierran el círculo, y
+las dos las pidió Edi expresamente.
 
 ---
 
@@ -31,6 +36,35 @@ de referencia que ya llega en la petición (`lat`/`lng`) y cortar, en vez de
 recorrerlos todos siempre.
 
 Aplica igual a `GeoEngine::guide()`, que tiene el mismo problema.
+
+## 1b. Los POIs locales no se usan  ← lo segundo
+
+**Decidido por Edi el 2026-08-07**, junto con lo de arriba: hay que servir los
+POIs del dispositivo cuando falte cobertura.
+
+**Estado:** el servidor ya sirve `/v1/guide` y `/v1/poi_types`, probado en el
+móvil (gasolineras a 2 km de Plaça Catalunya, con distancias). Pero **Navius
+sigue pidiéndolos a su Overpass** en los tres ports, así que sin cobertura no
+hay gasolineras, ni cafeterías, ni **radares** — que salen por esa misma vía y
+son de lo más visible cuando faltan.
+
+**Es el mismo trabajo que ya se hizo con la búsqueda** (commit `7d8d305` de
+`navius_android`), y conviene copiar ese patrón entero:
+
+1. En `NavSearch.js`, junto a `OSMSCOUT_SEARCH`, un `OSMSCOUT_GUIDE` y el mismo
+   interruptor `_osmScoutSearchOk`, que ya lo pone `Main.qml` con el resultado
+   de `detectOsmScout()`.
+2. Online primero (Overpass), local de respaldo si falla — igual que la
+   búsqueda, y por la misma razón: el índice de Overpass está más al día.
+3. Convertir la respuesta del servidor a la forma que ya consume la interfaz.
+   El servidor devuelve `{origin, results:[{title, admin_region, lat, lng,
+   type, distance}]}` y Overpass devuelve `{elements:[...]}`; hay que mapear,
+   como se hizo con los Feature de Photon.
+4. Portarlo a mano a UT y pmOS: los QML de los tres son independientes.
+
+**Ojo con los radares**, que no son un POI cualquiera: hoy salen de una consulta
+Overpass propia con `highway=speed_camera`. Comprobar si el geocoder los tiene
+con ese tipo antes de dar por hecho que `/v1/guide` los cubre.
 
 ## 2. Comprobar que la descarga grande aguanta
 
@@ -93,8 +127,6 @@ justo por donde se corto. La mitad del trabajo esta hecha.
 
 ## 4. Del lado de Navius
 
-- **Los POIs del cliente siguen yendo a Overpass**: `/v1/guide` está servido pero
-  Navius no lo llama. La búsqueda sí se conectó, en los tres ports.
 - **El puente de depuración por ficheros no escribe `navius_ack`** en Android: el
   `PUT` a `file://` no funciona. Por eso el comando `geocode<texto>` saca el
   resultado por `console.warn`.
