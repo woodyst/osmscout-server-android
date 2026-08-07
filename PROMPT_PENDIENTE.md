@@ -200,30 +200,51 @@ tapa, pero el servidor volvería a elegir mal qué 25 manda.
 - **No comprueba versiones.** El catálogo trae `version` por motor y aquí se
   ignora; si el servidor sube el formato, los datos viejos dejarán de cargar sin
   aviso claro.
-- **Que Navius despierte al servidor, en vez de tenerlo siempre vivo.**
-  Decidido por Edi el 2026-08-07.
+## 3b. Navius despierta al servidor — HECHO el 2026-08-08
 
-  Hoy el servidor levanta un servicio en primer plano de tipo `dataSync` y se
-  queda corriendo. Desde Android 15 ese tipo tiene **límite de 6 h diarias**, y
-  al agotarse el sistema lo para: para algo que debe responder conduciendo, no
-  sirve a largo plazo.
+Commits `a7e0355` (servidor) y `e4d3f34` (`navius_android`). UT y postmarketOS no
+necesitan nada: allí D-Bus ya hace de despertador.
 
-  La alternativa elegida —y es la que Edi ya aprobó en su día para el arranque,
-  §2.1 del plan— es el **equivalente del D-Bus de Ubuntu Touch**: Navius lanza un
-  Intent explícito al servicio del servidor justo antes de detectarlo. Navius
-  está en primer plano en ese momento, así que `startForegroundService()` está
-  permitido, y los 30 s de espera que `detectOsmScout()` ya tiene escritos
-  sirven exactamente para eso.
+El servidor ya no vive siempre. Corre **dentro del servicio de Android, en su
+propio proceso**, y lo levanta Navius con un Intent explícito —el equivalente de
+la activación por D-Bus— y lo para al cerrarse. Un solo binario con dos papeles,
+que distingue el `-service` que el manifiesto le pasa al servicio:
 
-  Con eso el servicio deja de tener que vivir siempre: se levanta cuando hace
-  falta y el límite diario deja de ser un problema.
+- **servicio**: motores + HTTP, sin interfaz.
+- **Activity**: gestor de mapas y estado, sin servidor. Solo puede haber uno
+  escuchando en el 8553, así que pregunta por HTTP igual que Navius, contra un
+  `/v1/status` nuevo que **no es del contrato del original**: es nuestro.
 
-  Nunca se implementó el Intent porque el servicio en primer plano bastaba para
-  probar. Falta: el lado de Navius (los tres ports) y decidir cuándo se para el
-  servidor —al cerrar Navius, o por inactividad—.
+Probado en el móvil en modo avión con el servidor apagado: se abre Navius, sale
+el Intent, arranca el proceso del servidor y Navius ya pinta el mapa con sus
+tiles. Al cerrar Navius, se para.
 
-  Recordatorio legal, ya razonado: **lanzar un Intent por nombre NO es enlazar**.
-  No entra código GPL en Navius, no comparten proceso ni compilación.
+**Tres trampas que costaron, y ninguna es evidente:**
+
+1. **ANR «executing service, waited 20001ms».** `QtServiceBase.onCreate()` acaba
+   llamando a `QtNative.startApplication()`, que ejecuta `main()` **en el hilo
+   desde el que se le llama y no vuelve hasta que la aplicación termina**. En el
+   hilo principal del servicio, ese `onCreate` no retorna nunca y Android lo da
+   por colgado —con su diálogo en pantalla— aunque el servidor funcione. Se
+   arranca Qt en otro hilo, que es lo que Qt ya hace con la Activity.
+2. **ANR «did not then call Service.startForeground()».** Cargar Qt se come el
+   plazo que hay para llamarlo. Va en `onCreate` y **antes** de Qt.
+3. **Los motores se cargan con `QTimer::singleShot(0)`**, ya dentro del bucle de
+   eventos. Cargar Valhalla y el geocoder de un territorio grande pasa de veinte
+   segundos, y Android da por colgado lo que tarde más de eso en arrancar.
+
+El tipo del servicio pasó de `dataSync` a **`specialUse`**: `dataSync` tiene tope
+de 6 h diarias desde Android 15 y un viaje largo las gasta. Comprobado en el
+móvil con `dumpsys activity services`: `types=40000000
+fgsHasTimeLimitedType=false`. A cambio hay que declarar para qué es, y está en
+el `<property>` del manifiesto.
+
+Del lado de Navius hace falta el bloque **`<queries>`**: desde Android 11 una app
+no ve a las demás si no las declara, y sin eso el Intent se bloquea sin decir por
+qué —en el log solo sale `AppsFilter: … BLOCKED`—.
+
+Recordatorio legal, ya razonado: **lanzar un Intent por nombre NO es enlazar**.
+No entra código GPL en Navius, no comparten proceso ni compilación.
 
 ## 4. Del lado de Navius
 
