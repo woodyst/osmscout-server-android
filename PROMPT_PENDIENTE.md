@@ -6,10 +6,9 @@ El plan por fases está en `~/prog_ia/navius/docs/PLAN-mapas-locales-android.md`
 Estado: **los cinco servicios del servidor funcionan y están probados en el móvil
 real** — rutas, tiles, búsqueda, POIs y descarga de mapas.
 
-Del lado de Navius, sin cobertura funcionan **ruta, mapa y búsqueda de destino**,
-que es la operativa principal. Faltan los POIs, que Navius sigue pidiendo a
-Overpass. Las dos primeras tareas de esta lista son las que cierran el círculo, y
-las dos las pidió Edi expresamente.
+Del lado de Navius, sin cobertura funcionan **ruta, mapa, búsqueda de destino y
+POIs** en los tres ports. Lo único que sigue abierto es que la búsqueda mira un
+solo territorio, que es la tarea 1.
 
 ## El objetivo, fijado por Edi el 2026-08-07
 
@@ -22,16 +21,21 @@ y postmarketOS.
 | Ruta | ✅ | ✅ los 3 ports | **sí** |
 | Mapa | ✅ | ✅ los 3 ports | **sí** |
 | Buscar destino | ✅ | ✅ los 3 ports | **sí** ⚠️ un territorio |
-| POIs y radares | ✅ | ❌ **ninguno de los 3** | **no** |
+| POIs | ✅ | ✅ los 3 ports | **sí** ⚠️ un territorio |
+| Radares | — | caché propia | **sí**, si ya se barrió la zona |
 | Alertas y mensajes de usuarios | — | — | no, y a propósito |
 
-Lo único que queda para el objetivo son las **tareas 1 y 1b**. La API comunitaria
+Lo único que queda para el objetivo es la **tarea 1**. La API comunitaria
 —alertas de otros conductores, mensajes, compartir viaje— seguirá siendo online
 porque no es un servicio de mapas: sin red no hay nada que sincronizar.
 
 Criterio de aceptación: **con el móvil en modo avión, buscar un destino, calcular
 la ruta, navegarla con el mapa dibujándose y que aparezcan los POIs y los avisos
 de radar del trayecto.** En los tres ports.
+
+Estado del criterio a 2026-08-08: cumplido en Android salvo los radares en zona
+nunca barrida (ver tarea 1b). En UT y pmOS el código es el mismo pero **falta
+probarlo en sus dispositivos**.
 
 ---
 
@@ -59,37 +63,41 @@ recorrerlos todos siempre.
 
 Aplica igual a `GeoEngine::guide()`, que tiene el mismo problema.
 
-## 1b. Los POIs locales no se usan  ← lo segundo
+## 1b. POIs locales — HECHO el 2026-08-08
 
-**Decidido por Edi el 2026-08-07**, junto con lo de arriba: hay que servir los
-POIs del dispositivo cuando falte cobertura.
+Cerrado en los tres ports: `navius_android` `fd3bfd2`, UT `e878022` (subido a
+`origin/main` de `github.com/woodyst/navius.git`) y pmOS `e02fefc` (subido a
+`main` de `github.com/woodyst/navius-postmarketos.git`).
 
-**Estado:** el servidor ya sirve `/v1/guide` y `/v1/poi_types`, probado en el
-móvil (gasolineras a 2 km de Plaça Catalunya, con distancias). Pero **Navius
-sigue pidiéndolos a su Overpass** en los tres ports, así que sin cobertura no
-hay gasolineras, ni cafeterías, ni **radares** — que salen por esa misma vía y
-son de lo más visible cuando faltan.
+Probado en el móvil real **en modo avión**: 34 gasolineras servidas por
+`/v1/guide`, con precios del MINETUR de la caché local, cuatro segundos desde el
+toque. En modo avión las peticiones fallan al instante, así que la cadena de
+Overpass se agota enseguida y no hay que esperar los timeouts.
 
-**Es el mismo trabajo que ya se hizo con la búsqueda** (commit `7d8d305` de
-`navius_android`), y conviene copiar ese patrón entero:
+Cómo quedó, por si hay que tocarlo:
 
-1. En `NavSearch.js`, junto a `OSMSCOUT_SEARCH`, un `OSMSCOUT_GUIDE` y el mismo
-   interruptor `_osmScoutSearchOk`, que ya lo pone `Main.qml` con el resultado
-   de `detectOsmScout()`.
-2. Online primero (Overpass), local de respaldo si falla — igual que la
-   búsqueda, y por la misma razón: el índice de Overpass está más al día.
-3. Convertir la respuesta del servidor a la forma que ya consume la interfaz.
-   El servidor devuelve `{origin, results:[{title, admin_region, lat, lng,
-   type, distance}]}` y Overpass devuelve `{elements:[...]}`; hay que mapear,
-   como se hizo con los Feature de Photon.
-4. Portarlo a mano a UT y pmOS: los QML de los tres son independientes.
-5. **Commit por port**, y en UT y pmOS **push al git publico** —lo pidio Edi
-   expresamente—. Ojo: esos dos hay que publicarlos desde el repositorio
-   publico, no desde otro remoto. Comprobar `git remote -v` antes de subir.
+- El tipo del geocoder es la etiqueta OSM con guión bajo (`amenity=fuel` →
+  `amenity_fuel`), que es justo `tag + "_" + val` de `_poiDefs`. Los ocho tipos
+  que usa Navius responden, **incluido `amenity_parking`**, que no está en la
+  tabla de alias: esa tabla es solo para buscar por nombre, no para filtrar.
+- La respuesta se convierte a la forma de Overpass (`{elements:[…]}`) para que
+  `_poiProcess` no se entere de por dónde vinieron. El `title` viene como
+  «Nombre, número, calle» y se parte por la primera coma.
+- En modo «en ruta» hay que repetir la consulta por cada muestra, porque el
+  geocoder pide punto y radio. Van en serie y con tope de 40 puntos.
 
-**Ojo con los radares**, que no son un POI cualquiera: hoy salen de una consulta
-Overpass propia con `highway=speed_camera`. Comprobar si el geocoder los tiene
-con ese tipo antes de dar por hecho que `/v1/guide` los cubre.
+**Los radares NO salen del geocoder.** Comprobado: su índice tiene 302 tipos y
+`highway=speed_camera` no es uno de ellos. Sin cobertura siguen saliendo de la
+caché local de radares (tabla `radares` en LocalStorage), que ya existía y es
+otra vía: funciona si la zona se barrió alguna vez con red. Para tenerlos de
+verdad offline en zona nueva haría falta otra fuente; no la hay hoy.
+
+**Trampa que costó una sesión y ya está pagada en los tres ports:**
+`NavSearch.js` NO es `.pragma library`, así que **cada componente que lo importa
+tiene SU copia de las variables**. `SearchPanel` es quien pide búsquedas y POIs,
+y no recibía el interruptor: se quedaba sin respaldo local aunque el servidor
+estuviera detectado. Todo interruptor que ponga `Main.qml` hay que reenviarlo al
+panel, igual que `setNavUrl`.
 
 ## 2. Comprobar que la descarga grande aguanta
 
