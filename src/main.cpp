@@ -29,6 +29,7 @@
 #include <QJniObject>
 #endif
 
+#include "cerrtolog.h"
 #include "geoengine.h"
 #include "mapboxglengine.h"
 #include "microhttpserver.h"
@@ -101,6 +102,10 @@ void startForegroundService()
 
 int main(int argc, char *argv[])
 {
+    // Lo primero: sin esto los errores del codigo vendorizado, que van a
+    // std::cerr, se pierden sin dejar rastro en Android.
+    static CerrToLog cerrToLog;
+
     QGuiApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("OSM Scout Server"));
     app.setOrganizationName(QStringLiteral("EGP Sistemas"));

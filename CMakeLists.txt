@@ -33,6 +33,7 @@ set(VALHALLA_BUILD_DIR "${VALHALLA_SOURCE_DIR}/build-android")
 
 qt_add_executable(osmscout-server
     src/main.cpp
+    src/cerrtolog.h
     src/geoengine.cpp
     src/geoengine.h
     src/mapboxglengine.cpp

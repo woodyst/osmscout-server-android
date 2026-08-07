@@ -33,11 +33,19 @@ if [ ! -d "$dir" ]; then
 fi
 
 echo "== compilando sqlite para arm64 =="
-# Los defines son los que recomienda upstream para uso empotrado. Interesa
-# SQLITE_THREADSAFE=1 porque libmicrohttpd atiende cada peticion en su hilo y
-# mapboxglengine comparte las conexiones entre ellos.
+# Los defines son los que recomienda upstream para uso empotrado, mas dos que
+# aqui NO son opcionales:
+#
+#   SQLITE_THREADSAFE=1   libmicrohttpd atiende cada peticion en su hilo y
+#                         mapboxglengine comparte las conexiones entre ellos.
+#   SQLITE_ENABLE_RTREE   la busqueda de POIs por cercania consulta la tabla
+#                         object_primary_rtree del geocoder. Sin esto la
+#                         amalgamacion no trae el modulo y /v1/guide falla con
+#                         "no such module: rtree" — y el error va a std::cerr,
+#                         que en Android no se ve (de ahi src/cerrtolog.h).
 "$TOOLS/${HOST}${API}-clang" -c -O2 -fPIC \
     -DSQLITE_THREADSAFE=1 \
+    -DSQLITE_ENABLE_RTREE \
     -DSQLITE_ENABLE_COLUMN_METADATA \
     -DSQLITE_OMIT_LOAD_EXTENSION \
     -DSQLITE_DEFAULT_FOREIGN_KEYS=1 \
