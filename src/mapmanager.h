@@ -61,6 +61,9 @@ public:
     /// datos de libpostal de su pais.
     Q_INVOKABLE void install(const QString &id);
 
+    /// Borra un territorio, respetando lo que compartan los demas.
+    Q_INVOKABLE void uninstall(const QString &id);
+
 signals:
     void changed();
     void finished(bool ok, const QString &message);
@@ -76,6 +79,8 @@ private:
     void setStatus(const QString &s, int progress = -1);
     void enqueueFeature(const QJsonObject &territory, const QString &feature,
                         const QStringList &files);
+    void enqueueGlobalIfMissing(const QJsonObject &cat, const QString &id,
+                                const QString &feature, const QStringList &files);
     void enqueuePackages(const QJsonObject &territory, const QString &feature,
                          const QString &subdir);
     void next();

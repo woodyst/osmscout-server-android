@@ -23,6 +23,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkReply>
+#include <QSet>
 
 #include <bzlib.h>
 
@@ -44,6 +45,20 @@ const QStringList GEOCODER_FILES = {
     QStringLiteral("geonlp-normalized.trie"),
     QStringLiteral("geonlp-normalized-id.kch"),
 };
+const QStringList POSTAL_GLOBAL_FILES = {
+    QStringLiteral("address_expansions/address_dictionary.dat"),
+    QStringLiteral("language_classifier/language_classifier.dat"),
+    QStringLiteral("numex/numex.dat"),
+    QStringLiteral("transliteration/transliteration.dat"),
+};
+const QStringList POSTAL_COUNTRY_FILES = {
+    QStringLiteral("address_parser/address_parser_crf.dat"),
+    QStringLiteral("address_parser/address_parser_phrases.dat"),
+    QStringLiteral("address_parser/address_parser_postal_codes.dat"),
+    QStringLiteral("address_parser/address_parser_vocab.trie"),
+};
+const QStringList MAPBOXGL_WORLD_FILES  = { QStringLiteral("tiles-world.sqlite") };
+const QStringList MAPBOXGL_GLYPHS_FILES = { QStringLiteral("glyphs.sqlite") };
 
 /// Descomprime bzip2 en memoria. Se mira la firma antes de intentarlo: no todo
 /// lo que sirve el servidor viene comprimido, y asi no hay que acertar por
@@ -149,17 +164,34 @@ QStringList MapManager::installed() const
     return QJsonDocument::fromJson(f.readAll()).object().keys();
 }
 
-/// El catalogo mezcla territorios con otras cosas: los paquetes globales
-/// (mapboxgl/global, postal/global...) y una entrada "url" que no es
-/// instalable. Se queda fuera solo esa ultima.
+/// El catalogo mezcla territorios con otras cosas. Se filtran dos:
+///
+///   - la entrada "url", que no es instalable: dice donde vive cada motor.
+///   - todo lo de mapnik, que son tiles RASTER. Este port no lleva mapnik
+///     —Navius usa tiles vectoriales— asi que ofrecerlos seria invitar a
+///     descargar cientos de MB que no se van a usar.
+///
+/// Los demas globales SI se quedan, aunque no sean territorios:
+/// mapboxgl/glyphs son las fuentes con las que se rotula el mapa y
+/// postal/global los datos de normalizacion de direcciones. Sin ellos el mapa
+/// sale sin nombres y la busqueda no entiende las consultas.
 void MapManager::reloadTerritories()
 {
     const QJsonObject cat = catalogue();
     m_territories.clear();
-    for (const QString &k : cat.keys())
+    for (const QString &k : cat.keys()) {
         if (cat.value(k).toObject().value(QStringLiteral("type")).toString()
-            != QLatin1String("url"))
-            m_territories << k;
+            == QLatin1String("url"))
+            continue;
+        if (k.startsWith(QLatin1String("mapnik")))
+            continue;
+        // Los globales —glyphs, mundo, postal— no se eligen: se instalan solos
+        // como dependencia del primer territorio que los necesite. Ver install().
+        if (cat.value(k).toObject().value(QStringLiteral("type")).toString()
+            != QLatin1String("territory"))
+            continue;
+        m_territories << k;
+    }
 }
 
 void MapManager::setStatus(const QString &s, int progress)
@@ -230,6 +262,29 @@ void MapManager::enqueueFeature(const QJsonObject &territory, const QString &fea
     }
 }
 
+/// Encola un paquete global solo si alguno de sus ficheros no esta ya en disco.
+/// Asi instalar un segundo territorio no vuelve a bajar los 100 MB del mundo ni
+/// los 72 MB de fuentes.
+void MapManager::enqueueGlobalIfMissing(const QJsonObject &cat, const QString &id,
+                                        const QString &feature, const QStringList &files)
+{
+    const QJsonObject entry = cat.value(id).toObject();
+    const QJsonObject f = entry.value(feature).toObject();
+    const QString path = f.value(QStringLiteral("path")).toString();
+    if (path.isEmpty())
+        return;
+
+    for (const QString &name : files) {
+        const QString dest = fullPath(path + QLatin1Char('/') + name);
+        if (QFile::exists(dest))
+            continue;
+        Job j;
+        j.url = featureUrl(feature, path + QLatin1Char('/') + name);
+        j.dest = dest;
+        m_queue.enqueue(j);
+    }
+}
+
 void MapManager::enqueuePackages(const QJsonObject &territory, const QString &feature,
                                  const QString &subdir)
 {
@@ -269,7 +324,20 @@ void MapManager::install(const QString &id)
     m_installing = id;
     m_queue.clear();
 
+    // Los globales van primero y solo si faltan: son dependencias del
+    // territorio, no algo que el usuario tenga que elegir. Sin los glyphs el
+    // mapa sale sin nombres, y sin los datos de postal la busqueda no entiende
+    // las consultas.
+    const QJsonObject cat = catalogue();
+    enqueueGlobalIfMissing(cat, QStringLiteral("mapboxgl/glyphs"),
+                           QStringLiteral("mapboxgl_glyphs"), MAPBOXGL_GLYPHS_FILES);
+    enqueueGlobalIfMissing(cat, QStringLiteral("mapboxgl/global"),
+                           QStringLiteral("mapboxgl_global"), MAPBOXGL_WORLD_FILES);
+    enqueueGlobalIfMissing(cat, QStringLiteral("postal/global"),
+                           QStringLiteral("postal_global"), POSTAL_GLOBAL_FILES);
+
     enqueueFeature(territory, QStringLiteral("geocoder_nlp"), GEOCODER_FILES);
+    enqueueFeature(territory, QStringLiteral("postal_country"), POSTAL_COUNTRY_FILES);
     // Los .tar de Valhalla y de los tiles se extraen; el resto son ficheros
     // sueltos que van tal cual a su sitio.
     enqueuePackages(territory, QStringLiteral("valhalla"), QStringLiteral("valhalla"));
@@ -465,6 +533,7 @@ bool MapManager::extractTar(const QString &tarPath, const QString &destDir)
     }
 
     mtar_header_t h;
+    QStringList listado;
     bool ok = true;
     while (mtar_read_header(&tar, &h) == MTAR_ESUCCESS) {
         const QString name = QString::fromUtf8(h.name);
@@ -478,6 +547,7 @@ bool MapManager::extractTar(const QString &tarPath, const QString &destDir)
         }
 
         const QString out = destDir + QLatin1Char('/') + name;
+        listado << name;
         if (h.type == MTAR_TDIR) {
             QDir().mkpath(out);
         } else if (h.type == MTAR_TREG) {
@@ -499,5 +569,100 @@ bool MapManager::extractTar(const QString &tarPath, const QString &destDir)
     }
 
     mtar_close(&tar);
+
+    // Se guarda que trajo cada paquete: sin esto no hay forma de desinstalar un
+    // territorio sin llevarse por delante ficheros de otro, porque los paquetes
+    // de zonas fronterizas se comparten. Es lo que hace el original con sus
+    // .tar.list.
+    if (ok) {
+        QFile lf(tarPath + QStringLiteral(".list"));
+        if (lf.open(QIODevice::WriteOnly | QIODevice::Text))
+            lf.write(listado.join(QLatin1Char('\n')).toUtf8());
+    }
+
     return ok;
+}
+
+/// Desinstala un territorio.
+///
+/// Borra lo suyo propio —geocoder y datos de pais de libpostal— y, de los
+/// paquetes, solo los que no use ningun otro territorio instalado: las zonas
+/// fronterizas comparten tiles, y borrar a lo bruto deja huecos en el mapa o en
+/// las rutas de un pais vecino, que es de lo mas dificil de diagnosticar.
+///
+/// Los globales (fuentes, mundo, postal) no se tocan: valen para todos.
+void MapManager::uninstall(const QString &id)
+{
+    if (m_busy)
+        return;
+
+    QFile f(fullPath(INSTALLED));
+    QJsonObject inst;
+    if (f.open(QIODevice::ReadOnly)) {
+        inst = QJsonDocument::fromJson(f.readAll()).object();
+        f.close();
+    }
+    const QJsonObject mio = inst.value(id).toObject();
+    if (mio.isEmpty())
+        return;
+
+    // Paquetes que siguen haciendo falta para los demas.
+    QSet<QString> enUso;
+    for (const QString &otro : inst.keys()) {
+        if (otro == id)
+            continue;
+        const QJsonObject o = inst.value(otro).toObject();
+        for (const QString &feat : { QStringLiteral("valhalla"),
+                                     QStringLiteral("mapboxgl_country") })
+            for (const QJsonValue &p : o.value(feat).toObject()
+                                            .value(QStringLiteral("packages")).toArray())
+                enUso.insert(feat + QLatin1Char(':') + p.toString());
+    }
+
+    int borrados = 0;
+
+    // Lo exclusivo del territorio: directorios enteros.
+    for (const QString &feat : { QStringLiteral("geocoder_nlp"),
+                                 QStringLiteral("postal_country") }) {
+        const QString path = mio.value(feat).toObject()
+                                 .value(QStringLiteral("path")).toString();
+        if (!path.isEmpty() && QDir(fullPath(path)).removeRecursively())
+            ++borrados;
+    }
+
+    // Los paquetes, uno a uno y solo si nadie mas los usa.
+    for (const QJsonValue &p : mio.value(QStringLiteral("valhalla")).toObject()
+                                   .value(QStringLiteral("packages")).toArray()) {
+        const QString pack = p.toString();
+        if (enUso.contains(QStringLiteral("valhalla:") + pack))
+            continue;
+        const QString lista = fullPath(QStringLiteral("valhalla/packages/%1.tar.list").arg(pack));
+        QFile lf(lista);
+        if (!lf.open(QIODevice::ReadOnly))
+            continue;   // instalado antes de guardar listas: se deja, no se adivina
+        for (const QString &rel : QString::fromUtf8(lf.readAll()).split(QLatin1Char('\n')))
+            if (!rel.trimmed().isEmpty() && QFile::remove(fullPath(rel.trimmed())))
+                ++borrados;
+        lf.close();
+        QFile::remove(lista);
+    }
+
+    for (const QJsonValue &p : mio.value(QStringLiteral("mapboxgl_country")).toObject()
+                                   .value(QStringLiteral("packages")).toArray()) {
+        const QString pack = p.toString();
+        if (enUso.contains(QStringLiteral("mapboxgl_country:") + pack))
+            continue;
+        if (QFile::remove(fullPath(QStringLiteral("mapboxgl/packages/tiles-section-%1.sqlite").arg(pack))))
+            ++borrados;
+    }
+
+    inst.remove(id);
+    if (f.open(QIODevice::WriteOnly)) {
+        f.write(QJsonDocument(inst).toJson(QJsonDocument::Indented));
+        f.close();
+    }
+
+    setStatus(QStringLiteral("Desinstalado %1 (%2 elementos)").arg(id).arg(borrados));
+    emit changed();
+    emit finished(true, m_status);
 }

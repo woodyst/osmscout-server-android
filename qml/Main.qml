@@ -70,6 +70,43 @@ Window {
             from: 0; to: 100
             value: mapManager.progress
         }
+
+        // ── Instalados ──────────────────────────────────────────────────────
+        // Aparte de la lista de disponibles: son pocos y lo que se quiere hacer
+        // con ellos —ver que hay y quitar lo que sobra— no tiene nada que ver
+        // con buscar entre 444.
+        Column {
+            width: parent.width
+            spacing: 4
+            visible: mapManager.installed.length > 0
+
+            Text {
+                text: "Instalados"
+                color: "#90A4AE"; font.pixelSize: 14; font.bold: true
+            }
+
+            Repeater {
+                model: mapManager.installed
+                delegate: Item {
+                    width: parent.width
+                    height: 40
+
+                    Text {
+                        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                        width: parent.width - 130
+                        text: modelData
+                        color: "#66BB6A"; font.pixelSize: 15
+                        elide: Text.ElideRight
+                    }
+                    Button {
+                        anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                        text: "Desinstalar"
+                        enabled: !mapManager.busy
+                        onClicked: mapManager.uninstall(modelData)
+                    }
+                }
+            }
+        }
     }
 
     // Lista de territorios agrupada por continente. Son 444 en el catálogo, y
@@ -85,15 +122,12 @@ Window {
             id: filtro
             width: parent.width
             placeholderText: "Filtrar territorio (p. ej. spain)"
-            // El estilo por defecto de QtQuick.Controls pinta el texto oscuro,
-            // y sobre este fondo no se lee nada. Hay que darlos explicitos.
+            // El estilo por defecto pinta el texto oscuro y sobre este fondo no
+            // se lee. Se cambian SOLO los colores: al sustituir tambien el
+            // background, el control pierde la geometria que le da el estilo y
+            // el recuadro acaba tapando el texto.
             color: "#ECEFF1"
             placeholderTextColor: "#607D8B"
-            background: Rectangle {
-                color: "#152232"
-                border.color: filtro.activeFocus ? "#29B6F6" : "#2A4060"
-                radius: 6
-            }
         }
 
         ListView {
