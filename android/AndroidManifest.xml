@@ -10,9 +10,10 @@
 
     <!-- Servicio en primer plano. Sin esto Android mata el proceso en cuanto
          Navius pasa al frente, que es justo cuando el servidor hace falta.
-         El tipo dataSync es obligatorio desde API 34. -->
+         Desde API 34 hay que declarar el tipo, y desde API 35 dataSync tiene un
+         tope de 6 h al dia: no vale para algo que responde conduciendo. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- Desde API 33 la notificacion permanente hay que pedirla. Si se deniega,
          el servicio sigue: solo se queda sin aviso visible. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -59,13 +60,34 @@
                 android:resource="@xml/qtprovider_paths"/>
         </provider>
 
-        <!-- Corre en el MISMO proceso que la Activity a proposito: el servidor
-             HTTP y Valhalla viven en el proceso de Qt, y lo que se busca con el
-             servicio es que Android suba la prioridad de ESE proceso. Ponerlo en
-             otro proceso obligaria a duplicar el motor. -->
+        <!-- El servidor. Corre en SU PROPIO proceso y ejecuta el mismo binario
+             que la Activity: lo que los distingue es el «-service» de
+             android.app.arguments, que hace que main() levante los motores y el
+             HTTP sin interfaz. Solo puede haber uno escuchando en el 8553, asi
+             que la Activity ya no arranca ninguno: pregunta a este por HTTP.
+
+             exported: hace falta para que Navius lo despierte con un Intent
+             explicito, que es el equivalente de la activacion por D-Bus de
+             Ubuntu Touch. No lleva intent-filter, asi que solo se puede arrancar
+             nombrando la clase. Y no expone nada que no expusiera ya: el
+             servidor escucha en loopback y cualquier app del dispositivo podia
+             hablarle igualmente. -->
         <service
             android:name="com.egpsistemas.osmscout.ServerService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:process=":servidor"
+            android:exported="true"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Servidor local de mapas para navegacion sin cobertura" />
+
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="osmscout-server" />
+
+            <meta-data
+                android:name="android.app.arguments"
+                android:value="-service" />
+        </service>
     </application>
 </manifest>

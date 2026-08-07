@@ -48,6 +48,8 @@ qt_add_executable(osmscout-server
     src/mapmanager.h
     src/routeservice.cpp
     src/routeservice.h
+    src/servercontrol.cpp
+    src/servercontrol.h
     src/valhallaengine.cpp
     src/valhallaengine.h
     # Envoltorio C++ de sqlite que usa el servidor original para leer los tiles.

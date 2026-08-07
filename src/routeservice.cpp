@@ -19,6 +19,9 @@
 #include "microhttpconnectionstore.h"
 
 #include <QDebug>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QString>
 
 namespace {
@@ -44,9 +47,27 @@ unsigned int sendError(MicroHTTP::Connection::keytype id, MHD_Response *response
 
 } // namespace
 
-RouteService::RouteService(ValhallaEngine *valhalla, MapboxGLEngine *mapbox, GeoEngine *geo)
-    : m_engine(valhalla), m_mapbox(mapbox), m_geo(geo)
+RouteService::RouteService(ValhallaEngine *valhalla, MapboxGLEngine *mapbox, GeoEngine *geo,
+                           const QString &mapsDir)
+    : m_engine(valhalla), m_mapbox(mapbox), m_geo(geo), m_mapsDir(mapsDir)
 {
+}
+
+unsigned int RouteService::serveStatus(MHD_Response *response,
+                                       MicroHTTP::Connection::keytype connection_id)
+{
+    QJsonObject obj;
+    obj.insert(QStringLiteral("routing"), m_engine->running());
+    obj.insert(QStringLiteral("tiles"), m_mapbox->running());
+    obj.insert(QStringLiteral("sections"), m_mapbox->sectionCount());
+    obj.insert(QStringLiteral("search"), m_geo->running());
+    obj.insert(QStringLiteral("territories"),
+               QJsonArray::fromStringList(m_geo->territories()));
+    obj.insert(QStringLiteral("mapsDir"), m_mapsDir);
+
+    sendData(connection_id, response, QJsonDocument(obj).toJson(QJsonDocument::Compact),
+             "application/json; charset=UTF-8");
+    return MHD_HTTP_OK;
 }
 
 namespace {
@@ -196,6 +217,12 @@ unsigned int RouteService::service(const char *url, MHD_Connection *connection,
                  "application/json; charset=UTF-8");
         return MHD_HTTP_OK;
     }
+
+    // Estado para la interfaz del propio servidor, que desde que el servidor
+    // vive en su propio proceso ya no tiene los motores a mano. No es del
+    // contrato del original: es nuestro.
+    if (path == QLatin1String("/v1/status"))
+        return serveStatus(response, connection_id);
 
     if (path.startsWith(QLatin1String("/v1/mbgl")))
         return serveMapboxGL(path, connection, response, connection_id);

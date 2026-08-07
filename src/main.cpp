@@ -21,6 +21,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QStandardPaths>
+#include <QTimer>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -37,6 +38,7 @@
 #include "mapmanager.h"
 #include "microhttpserver.h"
 #include "routeservice.h"
+#include "servercontrol.h"
 #include "valhallaengine.h"
 
 namespace {
@@ -131,44 +133,17 @@ QString findMapsDir()
     return QString();
 }
 
-#ifdef Q_OS_ANDROID
-/// Levanta el servicio en primer plano (android/src/.../ServerService.java).
+/// Carga los motores y abre el puerto. Va aparte de runServer() y se llama YA
+/// dentro del bucle de eventos: cargar Valhalla y el geocoder de un territorio
+/// grande pasa de veinte segundos, y Android da por colgado un servicio que
+/// tarda mas de eso en terminar de arrancar —ANR y proceso muerto—. Entrando
+/// antes en el bucle, Android da por hecho el arranque y esto sigue a su ritmo.
 ///
-/// El servicio no sirve nada: existe solo para que Android no mate ESTE proceso,
-/// que es donde viven el servidor HTTP y Valhalla, cuando el usuario se pase a
-/// Navius. Ver el comentario de la clase Java.
-void startForegroundService()
+/// El orden importa: el servidor HTTP se abre AL FINAL, cuando los motores ya
+/// estan. Si respondiera antes, Navius veria /v1/activate contestar y pediria
+/// una ruta que todavia no se puede calcular.
+void arrancarMotores()
 {
-    const QJniObject context = QNativeInterface::QAndroidApplication::context();
-    if (!context.isValid()) {
-        qWarning() << "OSMSCOUT: sin contexto de Android, no se arranca el servicio";
-        return;
-    }
-
-    QJniObject::callStaticMethod<void>("com/egpsistemas/osmscout/ServerService",
-                                       "start", "(Landroid/content/Context;)V",
-                                       context.object());
-    // Cualquier excepcion pendiente de JNI hay que limpiarla o la siguiente
-    // llamada al VM aborta el proceso. Ya paso en el port de Navius con el SAF.
-    if (QJniEnvironment().checkAndClearExceptions())
-        qWarning() << "OSMSCOUT: fallo al arrancar el servicio en primer plano";
-    else
-        qInfo() << "OSMSCOUT: servicio en primer plano arrancado";
-}
-#endif
-
-} // namespace
-
-int main(int argc, char *argv[])
-{
-    // Lo primero: sin esto los errores del codigo vendorizado, que van a
-    // std::cerr, se pierden sin dejar rastro en Android.
-    static CerrToLog cerrToLog;
-
-    QGuiApplication app(argc, argv);
-    app.setApplicationName(QStringLiteral("OSM Scout Server"));
-    app.setOrganizationName(QStringLiteral("EGP Sistemas"));
-
     migrateInternalMaps(preferredMapsDir());
     const QString mapsDir = findMapsDir();
 
@@ -187,7 +162,7 @@ int main(int argc, char *argv[])
     static GeoEngine geo;
     const bool geoOk = !mapsDir.isEmpty() && geo.start(mapsDir);
 
-    static RouteService service(&engine, &mapbox, &geo);
+    static RouteService service(&engine, &mapbox, &geo, mapsDir);
 
     // Solo loopback. El servidor no tiene autenticacion ninguna —igual que en
     // Ubuntu Touch— asi que no puede quedar expuesto a la red: quien tiene que
@@ -206,31 +181,71 @@ int main(int argc, char *argv[])
             << "busqueda" << (geoOk ? "OK" : "KO")
             << "servidor" << (serverOk ? "OK" : "KO")
             << "puerto" << SERVER_PORT;
+}
 
-#ifdef Q_OS_ANDROID
-    if (serverOk)
-        startForegroundService();
-#endif
+/// El servidor: motores, HTTP y nada mas. Corre dentro del servicio de Android,
+/// en su propio proceso, y lo despierta Navius con un Intent.
+///
+/// Sin interfaz a proposito. Antes vivia en el proceso de la Activity, lo que
+/// obligaba a tener el servicio en primer plano encendido siempre para que
+/// Android no lo matara; ahora solo existe mientras alguien lo necesita.
+int runServer(int argc, char *argv[])
+{
+    QCoreApplication app(argc, argv);
+    app.setApplicationName(QStringLiteral("OSM Scout Server"));
+    app.setOrganizationName(QStringLiteral("EGP Sistemas"));
+
+    QTimer::singleShot(0, &app, []() { arrancarMotores(); });
+    return app.exec();
+}
+
+/// La interfaz: gestor de mapas y estado. NO levanta el servidor —solo puede
+/// haber uno escuchando en el 8553— sino que lo arranca como servicio y le
+/// pregunta por HTTP, igual que hace Navius.
+int runGui(int argc, char *argv[])
+{
+    QGuiApplication app(argc, argv);
+    app.setApplicationName(QStringLiteral("OSM Scout Server"));
+    app.setOrganizationName(QStringLiteral("EGP Sistemas"));
+
+    // La migracion tambien aqui: la interfaz puede abrirse antes que el
+    // servidor, y el gestor de mapas necesita el directorio bueno.
+    migrateInternalMaps(preferredMapsDir());
+    const QString mapsDir = findMapsDir();
+    const QString destino = mapsDir.isEmpty() ? preferredMapsDir() : mapsDir;
+
+    static ServerControl control(SERVER_PORT);
+    control.start();   // si ya esta corriendo, Android no lo duplica
 
     QQmlApplicationEngine qml;
-    qml.rootContext()->setContextProperty(QStringLiteral("engineOk"), engineOk);
-    qml.rootContext()->setContextProperty(QStringLiteral("mapboxOk"), mapboxOk);
-    qml.rootContext()->setContextProperty(QStringLiteral("geoOk"), geoOk);
-    // Ya no es uno solo: la busqueda recorre todos los instalados.
-    qml.rootContext()->setContextProperty(QStringLiteral("territory"),
-                                          geo.territories().join(QStringLiteral(", ")));
-    qml.rootContext()->setContextProperty(QStringLiteral("sectionCount"), mapbox.sectionCount());
-    qml.rootContext()->setContextProperty(QStringLiteral("serverOk"), serverOk);
-    qml.rootContext()->setContextProperty(QStringLiteral("tileDir"),
-                                          mapsDir.isEmpty() ? QStringLiteral("—") : mapsDir);
+    qml.rootContext()->setContextProperty(QStringLiteral("server"), &control);
     qml.rootContext()->setContextProperty(QStringLiteral("serverPort"), int(SERVER_PORT));
+    qml.rootContext()->setContextProperty(QStringLiteral("tileDir"),
+                                          destino.isEmpty() ? QStringLiteral("—") : destino);
     // El gestor de mapas se expone al QML, que es quien tiene la lista y los
     // botones. Cuelga de la app para que viva lo que dure el proceso.
-    static MapManager mapManager(mapsDir.isEmpty() ? preferredMapsDir() : mapsDir);
+    static MapManager mapManager(destino);
     qml.rootContext()->setContextProperty(QStringLiteral("mapManager"), &mapManager);
     qml.load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
     if (qml.rootObjects().isEmpty())
         return -1;
 
     return app.exec();
+}
+
+} // namespace
+
+int main(int argc, char *argv[])
+{
+    // Lo primero: sin esto los errores del codigo vendorizado, que van a
+    // std::cerr, se pierden sin dejar rastro en Android.
+    static CerrToLog cerrToLog;
+
+    // Un solo binario, dos papeles. Los distingue el argumento que el
+    // manifiesto le pasa al servicio (android.app.arguments).
+    for (int i = 1; i < argc; ++i)
+        if (qstrcmp(argv[i], "-service") == 0)
+            return runServer(argc, argv);
+
+    return runGui(argc, argv);
 }

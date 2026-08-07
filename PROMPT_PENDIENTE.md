@@ -35,9 +35,9 @@ Criterio de aceptación: **con el móvil en modo avión, buscar un destino, calc
 la ruta, navegarla con el mapa dibujándose y que aparezcan los POIs y los avisos
 de radar del trayecto.** En los tres ports.
 
-Estado del criterio a 2026-08-08: cumplido en Android salvo los radares en zona
-nunca barrida (ver tarea 1b). En UT y pmOS el código es el mismo pero **falta
-probarlo en sus dispositivos**.
+Estado del criterio a 2026-08-08: **cumplido y probado en los tres ports** —Edi
+confirma UT y postmarketOS—, salvo los radares en zona nunca barrida (tarea 1b)
+y los nombres de ciudad muy comunes (tarea 2c).
 
 ---
 

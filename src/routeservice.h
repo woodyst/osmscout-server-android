@@ -40,13 +40,19 @@
 class RouteService : public MicroHTTP::ServiceBase
 {
 public:
-    RouteService(ValhallaEngine *valhalla, MapboxGLEngine *mapbox, GeoEngine *geo);
+    RouteService(ValhallaEngine *valhalla, MapboxGLEngine *mapbox, GeoEngine *geo,
+                 const QString &mapsDir = QString());
 
     unsigned int service(const char *url, MHD_Connection *connection,
                          MHD_Response *response,
                          MicroHTTP::Connection::keytype connection_id) override;
 
 private:
+    /// Lo que antes leia la interfaz de los motores que tenia en su propio
+    /// proceso. Ahora el servidor vive en otro, asi que se pregunta por HTTP.
+    unsigned int serveStatus(MHD_Response *response,
+                             MicroHTTP::Connection::keytype connection_id);
+
     unsigned int serveMapboxGL(const QString &path, MHD_Connection *connection,
                                MHD_Response *response,
                                MicroHTTP::Connection::keytype connection_id);
@@ -58,6 +64,7 @@ private:
     ValhallaEngine  *m_engine;
     MapboxGLEngine  *m_mapbox;
     GeoEngine       *m_geo;
+    QString          m_mapsDir;
 };
 
 #endif // ROUTESERVICE_H

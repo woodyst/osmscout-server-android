@@ -19,32 +19,41 @@ package com.egpsistemas.osmscout;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
-import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
-import android.os.IBinder;
+import android.util.Log;
+
+import org.qtproject.qt.android.bindings.QtService;
 
 /**
- * Servicio en primer plano que mantiene vivo el proceso del servidor.
+ * El servidor de mapas, como servicio de Android.
  *
- * No sirve HTTP ni toca Valhalla: eso vive en el proceso de Qt, donde lo arranca
- * main.cpp. Lo unico que hace este servicio es tener una notificacion
- * permanente, que es lo que le dice a Android que el proceso no se puede matar
- * aunque el usuario se vaya a otra app.
+ * Antes esto era un servicio vacio: el servidor HTTP y Valhalla vivian en el
+ * proceso de la Activity, y el servicio solo existia para que Android no lo
+ * matara al pasar el usuario a Navius. Eso obligaba a tenerlo encendido siempre.
  *
- * Hace falta porque el caso de uso es precisamente ese: el usuario abre Navius,
- * y esta app se queda detras. Sin servicio en primer plano, Android la mata en
- * cuanto necesita memoria —y un movil navegando con mapas cargados la necesita—
- * asi que las rutas dejarian de calcularse a mitad de viaje.
+ * Ahora el servidor corre AQUI. Al extender QtService, Android arranca el Qt de
+ * este proceso y ejecuta main(), al que el manifiesto le pasa «-service» para
+ * que levante los motores y el HTTP sin interfaz ninguna. Con eso lo puede
+ * despertar Navius con un Intent explicito cuando lo necesita, que es el
+ * equivalente de lo que hace D-Bus en Ubuntu Touch, y el resto del tiempo no
+ * hay nada corriendo.
+ *
+ * Sigue siendo un servicio en PRIMER PLANO mientras vive, y eso no sobra: el
+ * caso de uso es justo que el usuario este mirando Navius, y sin la notificacion
+ * permanente Android mata el proceso en cuanto necesita memoria —un movil
+ * navegando con mapas cargados la necesita— y las rutas dejarian de calcularse
+ * a mitad de viaje.
  */
-public class ServerService extends Service
+public class ServerService extends QtService
 {
+    private static final String TAG        = "OSMSCOUT";
     private static final String CHANNEL_ID = "osmscout_server";
     private static final int    NOTIF_ID   = 1;
 
-    /** La llama Qt por JNI cuando el servidor ya esta escuchando. */
+    /** La llama la interfaz por JNI. Navius manda el Intent por su cuenta. */
     public static void start(Context context)
     {
         final Intent intent = new Intent(context, ServerService.class);
@@ -59,14 +68,51 @@ public class ServerService extends Service
         context.stopService(new Intent(context, ServerService.class));
     }
 
+    /**
+     * Lo PRIMERO, y antes de que Qt haga nada.
+     *
+     * Quien arranca con startForegroundService() tiene un plazo corto para
+     * llamar a startForeground(), y si no lo cumple Android mata el proceso con
+     * un ANR —«did not then call Service.startForeground()»—. Cargar el Qt de
+     * este proceso, con libvalhalla y todo lo demas, se come ese plazo: puesto
+     * en onStartCommand no llegaba a tiempo. Aqui si.
+     */
     @Override
-    public IBinder onBind(Intent intent)
+    public void onCreate()
     {
-        return null;   // no se une nadie: se arranca y se para, nada mas
+        irAPrimerPlano();
+
+        // Y Qt, en OTRO hilo. QtServiceBase.onCreate() acaba llamando a
+        // QtNative.startApplication(), que ejecuta main() en el hilo desde el
+        // que se le llama y no vuelve hasta que la aplicacion termina. Puesto
+        // en el hilo principal del servicio, ese onCreate no retorna nunca y
+        // Android lo da por colgado: ANR «executing service, waited 20001ms»,
+        // con su dialogo en pantalla, aunque el servidor este funcionando.
+        //
+        // En el caso de la Activity, Qt ya hace esto mismo: main() corre en un
+        // hilo aparte. Aqui solo se replica.
+        new Thread(new Runnable() {
+            @Override
+            public void run()
+            {
+                ServerService.super.onCreate();
+            }
+        }, "osmscout-qt").start();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId)
+    {
+        // Repetirlo no molesta —solo actualiza la notificacion— y cubre el caso
+        // de que el servicio ya estuviera creado y solo llegue el arranque.
+        irAPrimerPlano();
+        super.onStartCommand(intent, flags, startId);
+
+        // START_STICKY: si aun asi Android lo mata, que lo vuelva a levantar.
+        return START_STICKY;
+    }
+
+    private void irAPrimerPlano()
     {
         createChannel();
 
@@ -78,13 +124,23 @@ public class ServerService extends Service
                         .setOngoing(true)
                         .build();
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
-            startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
-        else
-            startForeground(NOTIF_ID, notification);
-
-        // START_STICKY: si aun asi Android lo mata, que lo vuelva a levantar.
-        return START_STICKY;
+        // specialUse y no dataSync: desde Android 15, dataSync tiene un tope de
+        // 6 h al dia y al agotarlo el sistema para el servicio. Para algo que
+        // tiene que responder conduciendo eso no sirve, y un viaje largo las
+        // gasta. specialUse no tiene tope; a cambio hay que declarar para que es,
+        // y esta en el <property> del manifiesto.
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+                startForeground(NOTIF_ID, notification,
+                                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+            else
+                startForeground(NOTIF_ID, notification);
+            Log.i(TAG, "en primer plano");
+        } catch (Exception e) {
+            // Si falla, el servidor sigue arrancando: lo que se pierde es la
+            // proteccion contra que Android mate el proceso. Verlo importa.
+            Log.e(TAG, "no se pudo pasar a primer plano: " + e);
+        }
     }
 
     private void createChannel()

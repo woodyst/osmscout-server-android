@@ -9,7 +9,13 @@ Window {
     title: "OSM Scout Server"
     color: "#0D1B2A"
 
-    readonly property bool activo: serverOk && (engineOk || mapboxOk || geoOk)
+    // El servidor ya no vive en este proceso: corre como servicio y se le
+    // pregunta por HTTP, igual que hace Navius. Ver src/servercontrol.h.
+    readonly property bool activo: server.running && (server.routing || server.tiles || server.search)
+
+    /// Se ha tocado lo instalado desde que arrancó el servidor, así que lo que
+    /// tiene cargado ya no es lo que hay en disco.
+    property bool _mapasNuevos: false
 
     Column {
         id: cabecera
@@ -39,14 +45,15 @@ Window {
                     // ✓ si esta. Esta app no empaqueta fuente de simbolos como
                     // Navius, asi que se usa solo lo que el sistema garantiza.
                     text: win.activo ? "✓ Activo · 127.0.0.1:" + serverPort
-                                     : "No disponible"
-                    color: win.activo ? "#66BB6A" : "#EF5350"
+                         : server.starting ? "Arrancando… (los mapas grandes tardan)"
+                                           : "No disponible"
+                    color: win.activo ? "#66BB6A" : server.starting ? "#FFA726" : "#EF5350"
                     font.pixelSize: 18; font.bold: true
                 }
                 Text {
-                    text: "Rutas " + (engineOk ? "✓" : "—")
-                          + "   Mapa " + (mapboxOk ? "✓ (" + sectionCount + ")" : "—")
-                          + "   Búsqueda " + (geoOk ? "✓ " + territory : "—")
+                    text: "Rutas " + (server.routing ? "✓" : "—")
+                          + "   Mapa " + (server.tiles ? "✓ (" + server.sections + ")" : "—")
+                          + "   Búsqueda " + (server.search ? "✓ " + server.territories : "—")
                     color: "#90A4AE"; font.pixelSize: 14
                     wrapMode: Text.Wrap; width: parent.width
                 }
@@ -59,6 +66,13 @@ Window {
                 text: "Actualizar catálogo"
                 enabled: !mapManager.busy
                 onClicked: mapManager.refreshCatalogue()
+            }
+            Button {
+                // Arrancarlo a mano tiene sentido cuando Navius no está
+                // delante: para descargar mapas y comprobar que cargan.
+                text: win.activo ? "Parar servidor" : "Arrancar"
+                enabled: !mapManager.busy
+                onClicked: win.activo ? server.stop() : server.start()
             }
             Text {
                 text: mapManager.status
@@ -75,17 +89,20 @@ Window {
             value: mapManager.progress
         }
 
-        // Los motores se cargan al arrancar, asi que un mapa recien descargado
-        // no se usa hasta reiniciar. Se avisa y se da el boton, en vez de
-        // rearrancarlos en caliente: Valhalla y el geocoder mapean ficheros en
-        // memoria y recargarlos con peticiones en vuelo es pedir problemas.
+        // Los motores se cargan al arrancar el servidor, asi que un mapa recien
+        // descargado no se usa hasta reiniciarlo. Se avisa y se da el boton, en
+        // vez de rearrancarlos en caliente: Valhalla y el geocoder mapean
+        // ficheros en memoria y recargarlos con peticiones en vuelo es pedir
+        // problemas. Ahora reiniciar es de verdad reiniciar el servicio, sin
+        // tener que cerrar esta pantalla.
         Rectangle {
             width: parent.width
             height: aviso.implicitHeight + 20
             radius: 6
             color: "#2A1F0D"
             border.color: "#FFA726"
-            visible: mapManager.installed.length > 0 && !win.activo
+            visible: mapManager.installed.length > 0
+                     && (!win.activo || win._mapasNuevos)
 
             Column {
                 id: aviso
@@ -102,7 +119,7 @@ Window {
                 Button {
                     text: "Reiniciar servidor"
                     enabled: !mapManager.busy
-                    onClicked: Qt.quit()
+                    onClicked: { win._mapasNuevos = false; server.restart() }
                 }
             }
         }
@@ -138,7 +155,7 @@ Window {
                         anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                         text: "Desinstalar"
                         enabled: !mapManager.busy
-                        onClicked: mapManager.uninstall(modelData)
+                        onClicked: { win._mapasNuevos = true; mapManager.uninstall(modelData) }
                     }
                 }
             }
@@ -256,7 +273,7 @@ Window {
                         anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                         text: parent.yaEsta ? "Reinstalar" : "Instalar"
                         enabled: !mapManager.busy
-                        onClicked: mapManager.install(modelData.id)
+                        onClicked: { win._mapasNuevos = true; mapManager.install(modelData.id) }
                     }
                     Rectangle {
                         anchors.bottom: parent.bottom
