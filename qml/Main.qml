@@ -85,6 +85,15 @@ Window {
             id: filtro
             width: parent.width
             placeholderText: "Filtrar territorio (p. ej. spain)"
+            // El estilo por defecto de QtQuick.Controls pinta el texto oscuro,
+            // y sobre este fondo no se lee nada. Hay que darlos explicitos.
+            color: "#ECEFF1"
+            placeholderTextColor: "#607D8B"
+            background: Rectangle {
+                color: "#152232"
+                border.color: filtro.activeFocus ? "#29B6F6" : "#2A4060"
+                radius: 6
+            }
         }
 
         ListView {
