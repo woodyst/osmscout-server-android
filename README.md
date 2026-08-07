@@ -18,9 +18,9 @@ conservando sus algoritmos. Las desviaciones van anotadas con un comentario
 |---|---|---|
 | Rutas | `/v2/route` | funcionando |
 | Tiles vectoriales | `/v1/mbgl/*` | funcionando |
-| Búsqueda | `/v1/search`, `/v2/search` | pendiente |
-| POIs | `/v1/guide`, `/v1/poi_types` | pendiente |
-| Descarga de mapas | Map Manager | pendiente |
+| Búsqueda | `/v1/search`, `/v2/search` | funcionando |
+| POIs | `/v1/guide`, `/v1/poi_types` | funcionando |
+| Descarga de mapas | Map Manager | pendiente — mecanismo ya documentado en el plan |
 
 Plan por fases en `~/prog_ia/navius/docs/PLAN-mapas-locales-android.md`.
 
