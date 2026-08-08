@@ -1,5 +1,5 @@
 #!/bin/bash
-# Cross-compila Valhalla 3.4.0 para Android arm64. Se ejecuta EN erebos3.
+# Cross-compila Valhalla 3.4.0 para Android arm64. Necesita una maquina con holgura: no es un build de un rato.
 #
 # Version fijada por pkg-valhalla-lite de rinigus, que es lo que usa OSM Scout
 # Server. NO subirla sin comprobar que los tiles ya descargados siguen cargando:

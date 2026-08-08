@@ -1,5 +1,5 @@
 #!/bin/bash
-# Cross-compila libbz2 para Android arm64. Se ejecuta EN erebos3.
+# Cross-compila libbz2 para Android arm64. Necesita una maquina con holgura: no es un build de un rato.
 #
 # Los mapas del servidor de rinigus vienen comprimidos con bzip2 —de ahi que su
 # catalogo distinga "size" de "size-compressed"—. El Map Manager original los

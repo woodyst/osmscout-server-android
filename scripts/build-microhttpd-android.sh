@@ -1,5 +1,5 @@
 #!/bin/bash
-# Cross-compila libmicrohttpd para Android arm64. Se ejecuta EN erebos3.
+# Cross-compila libmicrohttpd para Android arm64. Necesita una maquina con holgura: no es un build de un rato.
 #
 # Es el servidor HTTP que usa OSM Scout Server (server/src/uhttp/), no Qt. Se
 # compila con autotools, asi que aqui no vale el patron de CMake del resto: se

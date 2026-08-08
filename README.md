@@ -1,56 +1,110 @@
 # OSM Scout Server para Android
 
-Mapas, rutas, búsqueda y POIs **sin conexión** para Navius Android.
+Mapas, rutas, búsqueda y puntos de interés **sin conexión**, servidos por HTTP
+desde el propio móvil. Es el port a Android de
+[osmscout-server](https://github.com/rinigus/osmscout-server) de Rinigus, que en
+Ubuntu Touch y Sailfish lleva años haciendo esto mismo.
 
-Es un proyecto **separado de Navius y con otra licencia**, y no por comodidad:
-OSM Scout Server es GPL-3.0-or-later y Navius Android es cerrado, así que su
-código no puede vivir dentro de Navius. Los dos se hablan por HTTP en
-`localhost:8553`, sin enlazar nada — igual que ya ocurre en Ubuntu Touch.
+No tiene mapa ni navegación: es un **servidor**. Escucha en
+`127.0.0.1:8553` y responde a cualquier app del dispositivo que hable su API.
+Se escribió para [Navius](https://github.com/woodyst/navius), pero la API es la
+del original, así que sirve para cualquier cliente que ya la use.
 
-Basado en [osmscout-server](https://github.com/rinigus/osmscout-server) de
-Rinigus. La capa HTTP (`vendor/uhttp/`) se copia tal cual; los motores se portan
-conservando sus algoritmos. Las desviaciones van anotadas con un comentario
-`EGP:` y en un `CAMBIOS.md` junto al código afectado.
+> **Por qué va aparte y con otra licencia.** OSM Scout Server es
+> GPL-3.0-or-later. Navius Android es una app cerrada, así que este código no
+> puede vivir dentro de ella: se hablan por HTTP, sin enlazar nada. Es la misma
+> separación que ya existe en Ubuntu Touch.
 
-## Estado
+## Qué hace
 
-| Servicio | Endpoint | Estado |
+| Servicio | Endpoint | Motor |
 |---|---|---|
-| Rutas | `/v2/route` | funcionando |
-| Tiles vectoriales | `/v1/mbgl/*` | funcionando |
-| Búsqueda | `/v1/search`, `/v2/search` | funcionando |
-| POIs | `/v1/guide`, `/v1/poi_types` | funcionando |
-| Descarga de mapas | Map Manager | pendiente — mecanismo ya documentado en el plan |
+| Rutas | `/v2/route` y el resto de `/v2/*` | Valhalla 3.4.0 |
+| Tiles vectoriales | `/v1/mbgl/*` | SQLite (MBTiles) |
+| Buscar destinos | `/v1/search`, `/v2/search` | geocoder-nlp + libpostal |
+| Puntos de interés | `/v1/guide`, `/v1/poi_types` | geocoder-nlp |
+| Estado | `/v1/status` | — (añadido aquí, no está en el original) |
+| Descarga de mapas | interfaz propia | mismo catálogo y mismo servidor que el original |
 
-Plan por fases en `~/prog_ia/navius/docs/PLAN-mapas-locales-android.md`.
+La búsqueda y los POIs recorren **todos los territorios instalados**, abriendo
+sus bases por turnos, porque geocoder-nlp solo admite una abierta a la vez.
 
-## Compilar
+## Cómo funciona en Android
 
-Se compila **en erebos3**, con Qt 6.8.3 android_arm64_v8a y NDK 26.1.10909125.
-Primero las dependencias cruzadas, que van a un prefijo común:
+El servidor corre **dentro de un servicio de Android, en su propio proceso**, y
+lo despierta el cliente con un Intent explícito cuando lo necesita — el
+equivalente de la activación por D-Bus de Ubuntu Touch:
 
+```java
+Intent i = new Intent();
+i.setComponent(new ComponentName("com.egpsistemas.osmscout",
+                                 "com.egpsistemas.osmscout.ServerService"));
+context.startForegroundService(i);   // con la app en primer plano
 ```
-scripts/build-valhalla-android.sh all     # protobuf + Valhalla 3.4.0
-scripts/build-microhttpd-android.sh       # servidor HTTP
-scripts/build-sqlite-android.sh           # amalgamación
-scripts/build-android.sh                  # el APK
+
+Quien lo llame necesita declararlo en su manifiesto, o desde Android 11 el
+Intent se bloquea sin decir por qué:
+
+```xml
+<queries><package android:name="com.egpsistemas.osmscout" /></queries>
 ```
 
-## Mapas
+Cargar los motores de un territorio grande lleva sus veinte segundos, así que
+conviene sondear `/v1/activate` con paciencia antes de darlo por no disponible.
 
-Se reutilizan **tal cual** los que descarga OSM Scout Server en Ubuntu Touch: son
-ficheros ya preparados, no se genera nada en el dispositivo. Van en el
-almacenamiento externo propio de la app, que es una ruta real del sistema de
-ficheros — hace falta que lo sea porque Valhalla mapea los tiles en memoria y un
-`content://` del SAF no serviría:
+## Los mapas
+
+Se usan **tal cual** los ficheros que prepara el servidor de Rinigus: no se
+genera ni se importa nada en el dispositivo. La app trae su propio gestor de
+descargas, con el mismo catálogo que el original.
 
 ```
 /sdcard/Android/data/com.egpsistemas.osmscout/files/Maps.OSM/
-├── valhalla/tiles/          rutas
-└── mapboxgl/
-    ├── packages/            tiles-world.sqlite, tiles-section-7-X-Y.sqlite
-    └── glyphs/glyphs.sqlite fuentes
+├── valhalla/tiles/                 rutas
+├── mapboxgl/
+│   ├── packages/                   tiles-world.sqlite, tiles-section-7-X-Y.sqlite
+│   └── glyphs/glyphs.sqlite        fuentes del rotulado
+├── geocoder-nlp/<territorio>/      búsqueda y POIs
+└── postal/                         normalización de direcciones
 ```
 
-**No cambiar la versión de Valhalla** sin comprobar que los tiles siguen
-cargando: el formato cambia entre versiones y los paquetes declaran `version 2`.
+Tiene que ser una ruta real del sistema de ficheros: Valhalla mapea los tiles en
+memoria y un `content://` del SAF no serviría.
+
+**El formato importa.** Cada motor declara la versión que sabe leer y se
+comprueba contra el catálogo antes de descargar nada. Cambiar la versión de
+Valhalla sin más deja los tiles ilegibles.
+
+## Compilar
+
+Qt 6.8.3 (`android_arm64_v8a`) y NDK 26.1.10909125. Primero las dependencias
+cruzadas, que van a un prefijo común, y después el APK:
+
+```sh
+scripts/build-valhalla-android.sh all     # protobuf + Valhalla 3.4.0
+scripts/build-microhttpd-android.sh       # servidor HTTP
+scripts/build-sqlite-android.sh           # amalgamación, con RTREE
+scripts/build-geocoder-deps-android.sh    # libpostal, marisa, kyotocabinet
+scripts/build-bzip2-android.sh            # descompresión de las descargas
+scripts/build-android.sh                  # el APK
+```
+
+Los scripts esperan Qt, el SDK y el NDK en el `$HOME`; se ajustan en las
+primeras líneas de cada uno. Hace falta una máquina con holgura: Valhalla y
+libpostal no se compilan en un rato.
+
+## Crédito y licencia
+
+Todo el mérito del diseño es de **Rinigus**, autor de
+[osmscout-server](https://github.com/rinigus/osmscout-server). Aquí se ha
+portado a Android conservando sus algoritmos y su API. La capa HTTP
+(`vendor/uhttp/`) se copia prácticamente tal cual; las desviaciones sobre el
+original van anotadas en un `CAMBIOS.md` junto al código afectado, para que se
+puedan rehacer si el upstream se actualiza.
+
+**GPL-3.0-or-later**, como el original. Ver [LICENSE](LICENSE).
+
+Copyright (C) 2016-2018 Rinigus · Copyright (C) 2026 EGP Sistemas
+
+Los mapas son de [OpenStreetMap](https://www.openstreetmap.org/copyright), bajo
+ODbL, y los preparan y sirven los contribuidores de OSM Scout Server.

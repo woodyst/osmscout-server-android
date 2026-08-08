@@ -1,5 +1,5 @@
 #!/bin/bash
-# Compila el APK de OSM Scout Server para Android. Se ejecuta EN erebos3.
+# Compila el APK de OSM Scout Server para Android.
 #
 # Antes hay que tener cruzadas las dependencias:
 #   ./build-valhalla-android.sh all

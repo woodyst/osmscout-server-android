@@ -1,5 +1,5 @@
 #!/bin/bash
-# Cross-compila SQLite para Android arm64. Se ejecuta EN erebos3.
+# Cross-compila SQLite para Android arm64. Necesita una maquina con holgura: no es un build de un rato.
 #
 # Android trae libsqlite en /system, pero el NDK NO la expone a las apps: no hay
 # cabeceras ni .so contra la que enlazar, y usar la del sistema por dlopen seria

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Cross-compila las dependencias del geocoder para Android arm64.
-# Se ejecuta EN erebos3.
+# Necesita una maquina con holgura: no es un build de un rato.
 #
 #   marisa-trie    el trie de los nombres normalizados (geonlp-normalized.trie)
 #   kyotocabinet   la base de identificadores (geonlp-normalized-id.kch)
