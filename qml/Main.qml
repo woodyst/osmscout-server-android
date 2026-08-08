@@ -14,8 +14,15 @@ Window {
     readonly property bool activo: server.running && (server.routing || server.tiles || server.search)
 
     /// Se ha tocado lo instalado desde que arrancó el servidor, así que lo que
-    /// tiene cargado ya no es lo que hay en disco.
+    /// tiene cargado ya no es lo que hay en disco. Lo pone el gestor cuando el
+    /// cambio se ha consumado de verdad: pulsar «Instalar» no basta, porque la
+    /// instalación puede rechazarse —formato incompatible— o fallar.
     property bool _mapasNuevos: false
+
+    Connections {
+        target: mapManager
+        function onInstalledChanged() { win._mapasNuevos = true }
+    }
 
     Column {
         id: cabecera
@@ -93,6 +100,27 @@ Window {
             value: mapManager.progress
         }
 
+        // Datos bajados con un formato que este binario no sabe leer. Sin este
+        // aviso, la única señal es que la búsqueda o las rutas dejan de ir, y no
+        // hay forma de relacionarlo con la versión de los mapas.
+        Rectangle {
+            width: parent.width
+            height: formatoMal.implicitHeight + 20
+            radius: 6
+            color: "#3A1113"
+            border.color: "#EF5350"
+            visible: mapManager.formatWarning !== ""
+
+            Text {
+                id: formatoMal
+                anchors { left: parent.left; right: parent.right
+                          verticalCenter: parent.verticalCenter; margins: 10 }
+                text: mapManager.formatWarning
+                color: "#FFCDD2"; font.pixelSize: 14
+                wrapMode: Text.Wrap
+            }
+        }
+
         // Una descarga cortada —el sistema mató la app, se acabó la batería, se
         // fue la red— deja el territorio a medias. Antes eso eran gigas en disco
         // que no salían en «Instalados» y no había forma de quitar desde aquí.
@@ -120,7 +148,7 @@ Window {
                     spacing: 10
                     Button {
                         text: "Reanudar"
-                        onClicked: { win._mapasNuevos = true; mapManager.resume() }
+                        onClicked: mapManager.resume()
                     }
                     Button {
                         text: "Descartar"
@@ -142,7 +170,9 @@ Window {
             radius: 6
             color: "#2A1F0D"
             border.color: "#FFA726"
-            visible: mapManager.installed.length > 0
+            // Mientras arranca no: tarda sus veinte segundos y decir «no se
+            // están usando» ahí es dar una alarma que se resuelve sola.
+            visible: mapManager.installed.length > 0 && !server.starting
                      && (!win.activo || win._mapasNuevos)
 
             Column {
@@ -196,7 +226,7 @@ Window {
                         anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                         text: "Desinstalar"
                         enabled: !mapManager.busy
-                        onClicked: { win._mapasNuevos = true; mapManager.uninstall(modelData) }
+                        onClicked: mapManager.uninstall(modelData)
                     }
                 }
             }
@@ -318,7 +348,7 @@ Window {
                         // medias baja solo lo que falta.
                         text: parent.yaEsta ? "Completar" : "Instalar"
                         enabled: !mapManager.busy
-                        onClicked: { win._mapasNuevos = true; mapManager.install(modelData.id) }
+                        onClicked: mapManager.install(modelData.id)
                     }
                     Rectangle {
                         anchors.bottom: parent.bottom

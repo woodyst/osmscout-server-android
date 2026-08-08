@@ -28,6 +28,8 @@
 
 #include <bzlib.h>
 
+#include "geocoder.h"   // GeoNLP::Geocoder::version
+
 extern "C" {
 #include "microtar.h"
 }
@@ -63,6 +65,49 @@ const QStringList POSTAL_COUNTRY_FILES = {
 };
 const QStringList MAPBOXGL_WORLD_FILES  = { QStringLiteral("tiles-world.sqlite") };
 const QStringList MAPBOXGL_GLYPHS_FILES = { QStringLiteral("glyphs.sqlite") };
+
+/// Version de formato que sabe leer cada motor. Los numeros son los del
+/// original (mapmanagerfeature.cpp); el del geocoder se toma de su propia
+/// constante para que no se puedan desincronizar.
+///
+/// El catalogo trae la version de cada cosa que sirve. Cuando rinigus cambia un
+/// formato sube ese numero, y los datos nuevos dejan de valer para un binario
+/// viejo —y al reves—. Sin comprobarlo, la unica senal era que el motor no
+/// cargaba: el geocoder responde con «no se pudo abrir la base», y Valhalla
+/// simplemente no encuentra rutas. Peor aun, se habrian bajado los gigas antes
+/// de enterarse.
+const QHash<QString, int> FEATURE_VERSION = {
+    { QStringLiteral("geocoder_nlp"),     GeoNLP::Geocoder::version },
+    { QStringLiteral("postal_global"),    2 },
+    { QStringLiteral("postal_country"),   2 },
+    { QStringLiteral("mapboxgl_global"),  3 },
+    { QStringLiteral("mapboxgl_glyphs"),  1 },
+    { QStringLiteral("mapboxgl_country"), 3 },
+    { QStringLiteral("valhalla"),         2 },
+};
+
+/// Devuelve los motores de esta entrada cuyo formato no sabemos leer, ya
+/// descritos para poder ensenarlos. Vacio = todo en orden.
+///
+/// Sirve igual para una entrada del catalogo (antes de bajar) que para una de
+/// countries_requested.json (lo ya instalado), porque el Map Manager guarda la
+/// entrada entera tal cual.
+QStringList incompatibles(const QJsonObject &entry)
+{
+    QStringList mal;
+    for (auto it = FEATURE_VERSION.constBegin(); it != FEATURE_VERSION.constEnd(); ++it) {
+        const QJsonObject f = entry.value(it.key()).toObject();
+        if (f.isEmpty())
+            continue;   // esa entrada no trae ese motor: no hay nada que comprobar
+        const QString v = f.value(QStringLiteral("version")).toString();
+        if (v.isEmpty())
+            continue;   // sin version declarada, se deja pasar como el original
+        if (v.toInt() != it.value())
+            mal << QStringLiteral("%1 (v%2, aquí v%3)").arg(it.key(), v).arg(it.value());
+    }
+    mal.sort();
+    return mal;
+}
 
 /// Descomprime bzip2 en memoria. Se mira la firma antes de intentarlo: no todo
 /// lo que sirve el servidor viene comprimido, y asi no hay que acertar por
@@ -225,6 +270,32 @@ QJsonObject MapManager::catalogue() const
     if (!f.open(QIODevice::ReadOnly))
         return QJsonObject();
     return QJsonDocument::fromJson(f.readAll()).object();
+}
+
+QString MapManager::formatWarning() const
+{
+    QFile f(fullPath(INSTALLED));
+    if (!f.open(QIODevice::ReadOnly))
+        return QString();
+
+    const QJsonObject inst = QJsonDocument::fromJson(f.readAll()).object();
+    QStringList afectados;
+    for (const QString &id : inst.keys())
+        if (!incompatibles(inst.value(id).toObject()).isEmpty())
+            afectados << id;
+
+    if (afectados.isEmpty())
+        return QString();
+
+    // El detalle de que motor y que version va al registro; en pantalla, lo que
+    // el usuario puede hacer.
+    for (const QString &id : afectados)
+        qWarning() << "OSMSCOUT[maps]: formato no soportado en" << id
+                   << incompatibles(inst.value(id).toObject());
+
+    return QStringLiteral("%1 se descargó con un formato que esta versión no "
+                          "lee. Actualiza la aplicación, o desinstala y vuelve "
+                          "a descargar.").arg(afectados.join(QStringLiteral(", ")));
 }
 
 QStringList MapManager::installed() const
@@ -392,6 +463,17 @@ void MapManager::install(const QString &id)
         return;
     }
 
+    // Antes de bajar nada: si el servidor sirve un formato que esta version no
+    // sabe leer, descargarlo son gigas tirados. Se para aqui y se dice por que.
+    const QStringList mal = incompatibles(territory);
+    if (!mal.isEmpty()) {
+        setStatus(QStringLiteral("%1 usa un formato que esta versión no lee: %2. "
+                                 "Hay que actualizar la aplicación.")
+                      .arg(id, mal.join(QStringLiteral(", "))));
+        emit finished(false, m_status);
+        return;
+    }
+
     m_installing = id;
     m_queue.clear();
 
@@ -488,6 +570,7 @@ void MapManager::discard()
     setStatus(QStringLiteral("Descartado %1 (%2 elementos, %3 a medias)")
                   .arg(id).arg(borrados).arg(trozos));
     emit changed();
+    emit installedChanged();
     emit finished(true, m_status);
 }
 
@@ -512,6 +595,7 @@ void MapManager::next()
         }
 
         setStatus(QStringLiteral("Instalado ") + m_installing, 100);
+        emit installedChanged();
         emit finished(true, m_status);
         return;
     }
@@ -782,6 +866,7 @@ void MapManager::uninstall(const QString &id)
 
     setStatus(QStringLiteral("Desinstalado %1 (%2 elementos)").arg(id).arg(borrados));
     emit changed();
+    emit installedChanged();
     emit finished(true, m_status);
 }
 

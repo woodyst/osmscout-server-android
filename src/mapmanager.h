@@ -45,6 +45,7 @@ class MapManager : public QObject
     Q_PROPERTY(QStringList territories READ territories NOTIFY changed)
     Q_PROPERTY(QStringList installed READ installed NOTIFY changed)
     Q_PROPERTY(QString pending READ pending NOTIFY changed)
+    Q_PROPERTY(QString formatWarning READ formatWarning NOTIFY changed)
 
 public:
     explicit MapManager(const QString &mapsDir, QObject *parent = nullptr);
@@ -58,6 +59,11 @@ public:
     /// Territorio que se quedo a medias, si lo hay. Vacio cuando no hay nada
     /// pendiente. Es lo que permite ofrecer «Reanudar» al volver a abrir.
     QString pending() const { return m_pending; }
+
+    /// Aviso sobre lo YA instalado cuyo formato esta version no sabe leer.
+    /// Vacio si todo esta en orden. Sin esto, unos datos viejos se traducen en
+    /// que la busqueda o las rutas no van y no hay forma de saber por que.
+    QString formatWarning() const;
 
     /// Baja el catalogo del servidor. Sin el no se puede instalar nada.
     Q_INVOKABLE void refreshCatalogue();
@@ -81,6 +87,13 @@ public:
 signals:
     void changed();
     void finished(bool ok, const QString &message);
+
+    /// Ha cambiado lo que hay instalado de verdad —instalar, desinstalar o
+    /// descartar—, o sea que lo que el servidor tiene cargado ya no es lo que
+    /// hay en disco. Va aparte de finished() porque ese tambien salta al
+    /// refrescar el catalogo y al rechazar una instalacion, y entonces no hay
+    /// nada que recargar.
+    void installedChanged();
 
 private:
     struct Job {

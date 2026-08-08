@@ -97,6 +97,19 @@ QVector<GeoEngine::Territory> GeoEngine::readInstalled(const QString &mapsDir) c
                 continue;   // consta instalado pero no esta: se ignora
             t.id = geoRel.section(QLatin1Char('/'), -1);
 
+            // Si el formato no es el que sabemos leer, mejor decirlo aqui: el
+            // geocoder lo rechazaria igual al abrirlo, pero con un «no se pudo
+            // abrir la base» que no explica nada. El gestor de mapas ensena el
+            // mismo aviso en pantalla.
+            const QString ver = entry.value(QStringLiteral("geocoder_nlp")).toObject()
+                                     .value(QStringLiteral("version")).toString();
+            if (!ver.isEmpty() && ver.toInt() != GeoNLP::Geocoder::version) {
+                qWarning() << "OSMSCOUT:" << t.id << "es de formato v" + ver
+                           << "y esta version lee v" << GeoNLP::Geocoder::version
+                           << "— se ignora; hay que actualizar la app o los mapas";
+                continue;
+            }
+
             const QString postalRel =
                 entry.value(QStringLiteral("postal_country")).toObject()
                      .value(QStringLiteral("path")).toString();
