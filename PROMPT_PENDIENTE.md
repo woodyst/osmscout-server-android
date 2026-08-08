@@ -8,9 +8,11 @@ real** — rutas, tiles, búsqueda, POIs y descarga de mapas.
 
 Del lado de Navius, sin cobertura funcionan **ruta, mapa, búsqueda de destino y
 POIs** en los tres ports, y la búsqueda mira ya todos los territorios
-instalados. De la lista de robustez solo queda **comprobar versiones de
-formato** (§3): las descargas ya se reanudan y el servidor ya lo despierta
-Navius.
+instalados. **La lista de robustez está cerrada**: descargas reanudables,
+arranque por Intent y comprobación de versiones de formato.
+
+Lo que queda son los dos límites conocidos —radares en zona nunca barrida (§1b)
+y nombres de ciudad muy comunes (§2c)— y las cosas menores de §3.
 
 ## El objetivo, fijado por Edi el 2026-08-07
 
@@ -179,9 +181,11 @@ tapa, pero el servidor volvería a elegir mal qué 25 manda.
 - **Desinstalar ya esta** (commit `8d83f61`), y respeta los paquetes que
   comparten los territorios vecinos. Lo instalado antes de ese commit no tiene
   `.tar.list` y de eso solo se borra el geocoder.
-- **No comprueba versiones.** El catálogo trae `version` por motor y aquí se
-  ignora; si el servidor sube el formato, los datos viejos dejarán de cargar sin
-  aviso claro.
+- **Versiones de formato — HECHO** (`1054de1`). Se comprueban las del catálogo
+  contra las que sabe leer cada motor —las mismas del original; la del geocoder
+  sale de `GeoNLP::Geocoder::version`—, al instalar (antes de bajar nada) y al
+  arrancar (contra `countries_requested.json`). Probado falseando el fichero:
+  bloquea la instalación y avisa en rojo de lo ya instalado.
 ## 3b. Navius despierta al servidor — HECHO el 2026-08-08
 
 Commits `a7e0355` (servidor) y `e4d3f34` (`navius_android`). UT y postmarketOS no
