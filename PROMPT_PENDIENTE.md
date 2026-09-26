@@ -171,6 +171,40 @@ referencia no influía a más de dos kilómetros. Detalle en
 síntoma —resultados de la otra punta del país—. El orden del lado del cliente lo
 tapa, pero el servidor volvería a elegir mal qué 25 manda.
 
+## 2e. Ofrecer los arreglos a upstream — CONVERSACIÓN ABIERTA el 26/09/2026
+
+Rinigus contestó al contacto de Edi. Dos cosas que cambian el panorama:
+
+- **Autoriza la distribución** del port: «sure, as long as you comply with
+  GPL». Ya no hay duda sobre publicarlo.
+- **Abre la puerta a fusionar**: «maybe we one day can merge it to have a single
+  code base that spans from linux to android».
+
+Si eso llega a pasar, lo que hay que ofrecerle está ya aislado y documentado. Son
+**dos cambios, y ninguno es específico de Android**:
+
+1. **El sesgo por cercanía del geocoder** (ver 2d y
+   `vendor/geocoder-nlp/CAMBIOS.md`). Es el importante: **le afecta hoy en
+   Sailfish y en Ubuntu Touch**, no solo aquí. Una línea:
+   `zoom = std::min(std::max(zoom, 1), 18)` en vez de `std::max(zoom, 18)`.
+   Arregla además un desplazamiento negativo, que es comportamiento indefinido.
+2. **El `std::min` de `uhttp/microhttpserver.cpp`** (ver
+   `vendor/uhttp/CAMBIOS.md`). Solo se manifiesta compilando con Qt 6, porque
+   `QByteArray::size()` pasó de `int` a `qsizetype`. Upstream sigue en Qt 5, así
+   que hoy no le duele, pero le dolerá el día que migre.
+
+**Lo que hay que decirle sin que lo pregunte**, porque es lo único que se desvía
+de su contrato y no un simple port: **`/v1/status` es una extensión nuestra**. Se
+añadió porque con el servidor en su propio proceso, su propia interfaz ya no
+tiene los motores a mano. Si se fusionan los códigos, esa es una decisión de
+diseño suya, no nuestra.
+
+Lo demás específico de Android es la **activación**, que sustituye a D-Bus:
+servicio en primer plano en su propio proceso, Intent explícito desde el cliente,
+`<queries>` en el manifiesto del cliente —sin ella Android 11+ bloquea el Intent
+en silencio— y `/v1/activate` conservado por compatibilidad pero respondiendo al
+instante. Ver 3b.
+
 ## 3. Cosas menores
 
 - **`⛽` (U+26FD) sale como cuadradito en Navius.** Los otros siete símbolos que
