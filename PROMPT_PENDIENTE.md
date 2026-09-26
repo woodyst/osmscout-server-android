@@ -205,6 +205,50 @@ servicio en primer plano en su propio proceso, Intent explícito desde el client
 en silencio— y `/v1/activate` conservado por compatibilidad pero respondiendo al
 instante. Ver 3b.
 
+## 2f. Publicar en Google Play — PENDIENTE, decidido el 26/09/2026
+
+Sin este servidor en la tienda, la navegación sin conexión que **ya se anuncia en
+la ficha de Navius** no existe para nadie que no compile. Así que va.
+
+**Hacerlo después de que Navius esté publicada.** Abrir un segundo frente con una
+revisión en curso y los 12 testers a medio reunir complica el seguimiento sin
+ganar nada.
+
+### Lo que hace falta, por orden de esfuerzo
+
+1. **El mismo salto de toolchain que Navius, y peor.** `targetSdk` está en 35 y
+   Play exige 36; y el alineado a páginas de 16 KB aplica igual. La diferencia:
+   Navius solo tenía que alinear **una** biblioteca propia, y aquí se compilan
+   **siete** —Valhalla, microhttpd, libpostal, marisa, kyotocabinet, SQLite y
+   bzip2—. A cada guion de `scripts/` hay que añadirle:
+
+       -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384
+
+   Y subir a Qt 6.9.3 y NDK 27.3, que es lo que ya está instalado en `ia`. Ver
+   la sección equivalente en el `pte.txt` de `navius_android`, que tiene el
+   procedimiento y el comando de verificación con `readelf`.
+
+2. **Clave de firma.** Hoy se firma con la de depuración. Lo sensato es
+   **reutilizar `~/navius-keys/navius-upload.jks` con otro alias** en vez de
+   crear una segunda clave irreemplazable que custodiar. Play lo permite: la
+   clave de subida puede ser la misma para varias apps.
+
+3. **Ficha propia entera**: icono 512, gráfico 1024×500, capturas, descripciones
+   y las once declaraciones de contenido. Lo único rápido de verdad es
+   **Seguridad de los datos**, que es casi vacía: el servidor no recoge nada del
+   usuario, solo descarga mapas del catálogo de Rinigus.
+
+4. **GPL en Play** no es problema —a diferencia de Apple— y el repositorio
+   público ya cumple la obligación de ofrecer el código.
+
+### Lo que hay que averiguar antes, sin suponerlo
+
+**Si el requisito de 12 testers durante 14 días se aplica por cuenta o por
+aplicación.** La impresión es que el acceso a producción se concede a la cuenta y
+que una vez aprobada no se repite, pero **no está confirmado**. Se verá en la
+consola cuando Navius supere la prueba. De eso depende que esto sea «subir y ya»
+o volver a empezar con dos semanas de calendario.
+
 ## 3. Cosas menores
 
 - **`⛽` (U+26FD) sale como cuadradito en Navius.** Los otros siete símbolos que
