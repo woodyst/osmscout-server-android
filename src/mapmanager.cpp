@@ -23,7 +23,9 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QFutureWatcher>
 #include <QNetworkReply>
+#include <QtConcurrent/QtConcurrentRun>
 #include <QSet>
 
 #include <bzlib.h>
@@ -660,23 +662,47 @@ void MapManager::next()
         }
 
         if (job.isTar) {
+            // La extraccion va EN OTRO HILO. Hecha aqui bloquea el hilo de la
+            // interfaz durante minutos —un mapa grande son gigas de ficheros
+            // pequeños—, y entonces Android saca el dialogo de «la aplicacion no
+            // responde» y el usuario la mata a mitad de la instalacion. Reportado
+            // por un tester el 28/09/2026 bajando el mapa de España: «se bloqueó
+            // y me obligó a cerrar».
+            //
             // A la RAIZ de los mapas, no al directorio del paquete: los .tar ya
             // traen dentro rutas del tipo "valhalla/tiles/0/…", asi que
             // extraerlos en valhalla/ dejaba un valhalla/valhalla/tiles que el
             // motor no encuentra. No se noto hasta instalar desde cero, porque
             // el directorio bueno ya existia de una copia anterior.
-            if (!extractTar(job.dest, m_mapsDir)) {
-                m_busy = false;
-                setStatus(QStringLiteral("No se pudo extraer ") + job.dest);
-                emit finished(false, m_status);
-                return;
-            }
-            // El .tar ya no hace falta y ocupa lo mismo que lo que contiene.
-            QFile::remove(job.dest);
+            setStatus(QStringLiteral("Instalando %1…")
+                          .arg(QFileInfo(job.dest).fileName()));
+
+            auto *watcher = new QFutureWatcher<bool>(this);
+            connect(watcher, &QFutureWatcher<bool>::finished, this,
+                    [this, watcher, job] {
+                const bool ok = watcher->result();
+                watcher->deleteLater();
+
+                if (!ok) {
+                    m_busy = false;
+                    setStatus(QStringLiteral("No se pudo extraer ") + job.dest);
+                    emit finished(false, m_status);
+                    return;
+                }
+                // El .tar ya no hace falta y ocupa lo mismo que lo que contiene.
+                QFile::remove(job.dest);
+                // Despues de CADA fichero, no al final. Es la diferencia entre
+                // poder reanudar y quedarse con gigas huerfanos si Android mata
+                // el proceso.
+                saveProgress();
+                next();
+            });
+            watcher->setFuture(QtConcurrent::run([this, job] {
+                return extractTar(job.dest, m_mapsDir);
+            }));
+            return;   // el resto del trabajo sigue en el callback de arriba
         }
 
-        // Despues de CADA fichero, no al final. Es la diferencia entre poder
-        // reanudar y quedarse con gigas huerfanos si Android mata el proceso.
         saveProgress();
         next();
     });

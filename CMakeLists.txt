@@ -9,13 +9,13 @@
 # ademas de que en Qt 6 el despliegue de Android esta pensado para CMake.
 cmake_minimum_required(VERSION 3.21)
 
-project(osmscout-server-android VERSION 0.1.1 LANGUAGES C CXX)
+project(osmscout-server-android VERSION 0.1.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Concurrent Core Gui Network Qml Quick)
 qt_standard_project_setup(REQUIRES 6.5)
 
 # ── Dependencias cruzadas a mano ────────────────────────────────────────────
@@ -90,7 +90,7 @@ target_include_directories(osmscout-server PRIVATE
 target_compile_options(osmscout-server PRIVATE -isystem "${BOOST_HEADERS_DIR}")
 
 target_link_libraries(osmscout-server PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick
+    Qt6::Core Qt6::Concurrent Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick
     "${VALHALLA_BUILD_DIR}/src/libvalhalla.so"
     "${ANDROID_DEPS_PREFIX}/lib/libmicrohttpd.a"
     "${ANDROID_DEPS_PREFIX}/lib/libprotobuf-lite.a"
@@ -134,7 +134,7 @@ if(ANDROID)
         QT_ANDROID_PACKAGE_NAME       com.egpsistemas.osmscout
         QT_ANDROID_APP_NAME           "OSM Scout Server"
         QT_ANDROID_VERSION_NAME       ${PROJECT_VERSION}
-        QT_ANDROID_VERSION_CODE       2
+        QT_ANDROID_VERSION_CODE       3
         QT_ANDROID_TARGET_SDK_VERSION 35
         QT_ANDROID_MIN_SDK_VERSION    28
         QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android"
