@@ -800,16 +800,44 @@ bool MapManager::extractTar(const QString &tarPath, const QString &destDir)
             QDir().mkpath(out);
         } else if (h.type == MTAR_TREG) {
             QDir().mkpath(QFileInfo(out).absolutePath());
-            QByteArray buf(int(h.size), Qt::Uninitialized);
-            if (mtar_read_data(&tar, buf.data(), h.size) != MTAR_ESUCCESS) {
-                ok = false;
-                break;
-            }
             QFile f(out);
-            if (!f.open(QIODevice::WriteOnly) || f.write(buf) != buf.size()) {
+            if (!f.open(QIODevice::WriteOnly)) {
                 ok = false;
                 break;
             }
+            // Por trozos, no de una vez.
+            //
+            // Antes esto era `QByteArray buf(int(h.size))` y un solo
+            // mtar_read_data: el fichero entero en RAM. Un .tar de mapas trae
+            // dentro piezas de cientos de megas —los indices del geocoder, los
+            // tiles de Valhalla—, asi que en un movil con 4 GB el sistema mata
+            // la app a mitad de la extraccion. Y el `int` remataba la jugada:
+            // h.size es unsigned, asi que a partir de 2 GB salia negativo.
+            //
+            // microtar admite leer en varias tandas: lleva su propio
+            // remaining_data y vuelve solo a la cabecera al terminar la pieza.
+            const unsigned CHUNK = 4u << 20;   // 4 MB
+            QByteArray buf(int(CHUNK), Qt::Uninitialized);
+            unsigned restante = h.size;
+            while (restante > 0) {
+                const unsigned n = qMin(restante, CHUNK);
+                if (mtar_read_data(&tar, buf.data(), n) != MTAR_ESUCCESS) {
+                    ok = false;
+                    break;
+                }
+                if (f.write(buf.constData(), qint64(n)) != qint64(n)) {
+                    // Lo normal aqui es que no quepa: un mapa descomprimido
+                    // ocupa mas que el .tar que lo trae, y los dos conviven
+                    // hasta que termina la extraccion.
+                    qWarning() << "OSMSCOUT[maps]: no se pudo escribir" << out
+                               << "— ¿queda espacio?";
+                    ok = false;
+                    break;
+                }
+                restante -= n;
+            }
+            if (!ok)
+                break;
         }
 
         if (mtar_next(&tar) != MTAR_ESUCCESS)

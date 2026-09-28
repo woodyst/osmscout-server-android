@@ -9,7 +9,7 @@
 # ademas de que en Qt 6 el despliegue de Android esta pensado para CMake.
 cmake_minimum_required(VERSION 3.21)
 
-project(osmscout-server-android VERSION 0.1.0 LANGUAGES C CXX)
+project(osmscout-server-android VERSION 0.1.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -134,7 +134,7 @@ if(ANDROID)
         QT_ANDROID_PACKAGE_NAME       com.egpsistemas.osmscout
         QT_ANDROID_APP_NAME           "OSM Scout Server"
         QT_ANDROID_VERSION_NAME       ${PROJECT_VERSION}
-        QT_ANDROID_VERSION_CODE       1
+        QT_ANDROID_VERSION_CODE       2
         QT_ANDROID_TARGET_SDK_VERSION 35
         QT_ANDROID_MIN_SDK_VERSION    28
         QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android"
