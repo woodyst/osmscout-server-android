@@ -90,5 +90,15 @@ if "$BT/aapt" dump badging "$DESTINO" | grep -q application-debuggable; then
     echo "ERROR: el APK es depurable; no se publica"; exit 1
 fi
 "$BT/apksigner" verify --print-certs "$DESTINO" | grep -E "certificate DN|SHA-256 digest" | head -2
+
+# Que la version del paquete sea la del CMakeLists y no otra. El manifiesto la
+# llevo cableada —versionCode 1, versionName 0.1.0— hasta el 13/10/2026, asi que
+# la 0.1.1 y la 0.1.2 salieron por ahi diciendo que eran la 0.1.0: se instalaban
+# igual, pero nadie podia saber que version tenia puesta.
+EN_APK=$("$BT/aapt" dump badging "$DESTINO" | grep -oE "versionName='[^']+'" | cut -d"'" -f2)
+if [ "$EN_APK" != "$VERSION" ]; then
+    echo "ERROR: el APK dice ser $EN_APK y el proyecto es $VERSION"; exit 1
+fi
+echo "version dentro del APK: $EN_APK  (coincide con CMakeLists)"
 echo
 echo "APK firmado: $DESTINO ($(stat -c%s "$DESTINO") bytes)"
